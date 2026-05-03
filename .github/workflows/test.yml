@@ -1,22 +1,49 @@
-name: Download with Proxy
+name: Extract YouTube Direct URL
+
 on:
   workflow_dispatch:
     inputs:
-      url: { required: true, type: string }
-permissions: { contents: write }
+      url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  download:
+  extract-url:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: pip install yt-dlp-proxy
-      - run: yt-dlp-proxy update  # fetch & test proxies
-      - run: |
-          mkdir -p videos
-          cd videos
-          yt-dlp-proxy ${{ github.event.inputs.url }}
-      - run: |
-          git config user.name github-actions
-          git add videos/ && git commit -m "video" || true
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg & yt-dlp
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
+          pip3 install --upgrade yt-dlp
+
+      - name: Get Direct Video URL
+        id: get_url
+        env:
+          YT_URL: ${{ github.event.inputs.url }}
+        run: |
+          # This will print the direct URL so we can capture it.
+          DIRECT_URL=$(yt-dlp -g --extractor-args "youtube:player-client=android" "$YT_URL" | head -1)
+          echo "DIRECT_URL=$DIRECT_URL" >> $GITHUB_ENV
+          echo "The direct URL is: $DIRECT_URL"
+
+      - name: Save URL to a Text File (Optional)
+        run: |
+          mkdir -p output
+          echo "URL: ${{ github.event.inputs.url }}" > output/url_info.txt
+          echo "Extracted Direct Link: $DIRECT_URL" >> output/url_info.txt
+
+      - name: Commit and Push URL Info
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add output/url_info.txt
+          git diff --staged --quiet || git commit -m "Extracted direct URL for ${{ github.event.inputs.url }}"
           git push
