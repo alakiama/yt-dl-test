@@ -1,4 +1,4 @@
-name: ⬇️ YouTube Download (Impersonation + Zip Split)
+name: Download YouTube Video (Setup yt-dlp Action)
 
 on:
   workflow_dispatch:
@@ -7,106 +7,37 @@ on:
         description: 'YouTube video URL'
         required: true
         type: string
-      split_threshold_mb:
-        description: 'Split files larger than this MB (0 = never split)'
-        required: false
-        default: 90
-        type: number
 
 permissions:
   contents: write
 
 jobs:
-  download-and-split:
+  download:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Setup yt-dlp
+        uses: AnimMouse/setup-yt-dlp@v3
+
+      - name: Setup yt-dlp YouTube cookies (bypass bot detection)
+        uses: AnimMouse/setup-yt-dlp/cookies@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          cookies: ${{ secrets.YOUTUBE_COOKIES }}
 
-      - name: Install dependencies (ffmpeg, zip)
+      - name: Create downloads folder
+        run: mkdir -p downloads
+
+      - name: Download YouTube video to folder
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg zip
-          pip3 install --upgrade pip
-          pip3 install --upgrade "yt-dlp[default,curl-cffi]"
+          cd downloads
+          yt-dlp -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
 
-      - name: Create directories
-        run: mkdir -p downloads tmp_downloads
-
-      - name: Download YouTube video with impersonation
-        id: download
+      - name: Commit and push video
         run: |
-          URL="${{ github.event.inputs.url }}"
-          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
-          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
-
-          echo "⬇️ Downloading $URL using yt-dlp with browser impersonation..."
-
-          cd tmp_downloads
-          yt-dlp \
-            --impersonate chrome \
-            --extractor-args "youtube:player-client=default" \
-            -f "bestvideo+bestaudio/best" \
-            -o "%(title)s.%(ext)s" \
-            "$URL"
-
-          cd ..
-
-          DOWNLOADED_FILE=$(ls tmp_downloads/ | head -1)
-          SIZE=$(stat -c%s "tmp_downloads/$DOWNLOADED_FILE")
-          BASENAME="${DOWNLOADED_FILE%.*}"
-
-          echo "📁 Downloaded: $DOWNLOADED_FILE ($(( SIZE / 1024 / 1024 )) MB)"
-          echo "BASENAME=$BASENAME" >> $GITHUB_ENV
-
-          # Split if necessary
-          if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
-            echo "✂️ File exceeds ${SPLIT_THRESHOLD_MB}MB — splitting into zip parts"
-            zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "tmp_downloads/$DOWNLOADED_FILE"
-            echo "✅ Parts: $(ls downloads/${BASENAME}.z* 2>/dev/null | wc -l)"
-            rm -rf tmp_downloads
-          else
-            echo "📦 File within limit — moving directly"
-            mv "tmp_downloads/$DOWNLOADED_FILE" "downloads/$DOWNLOADED_FILE"
-            rm -rf tmp_downloads
-          fi
-
-      - name: Commit & Push (batches of 5 files)
-        run: |
-          BRANCH="${GITHUB_REF_NAME}"
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-
-          echo "🏷️ AVASAM - Committing downloads"
-
-          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/)
-
-          TOTAL=${#ALL_FILES[@]}
-          echo "📦 Total files to push: $TOTAL"
-
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "Nothing to commit"
-            exit 0
-          fi
-
-          BATCH_SIZE=5
-          BATCH_NUM=0
-
-          for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
-            BATCH_NUM=$(( BATCH_NUM + 1 ))
-            BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
-
-            echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
-
-            git add "${BATCH[@]}"
-            git commit -m "[AVASAM] Add YouTube download — batch $BATCH_NUM [skip ci]"
-
-            git pull --rebase origin "$BRANCH"
-            git push origin HEAD:"$BRANCH"
-
-            echo "✅ Batch $BATCH_NUM pushed"
-          done
-
-          echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es) — AVASAM (https://avasam.ir)"
+          git add downloads/
+          git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
+          git push
