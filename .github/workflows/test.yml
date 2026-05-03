@@ -1,4 +1,4 @@
-name: Get YouTube Direct URL with Free Proxy
+name: Download YouTube Video with Proxy Router
 
 on:
   workflow_dispatch:
@@ -12,60 +12,57 @@ permissions:
   contents: write
 
 jobs:
-  get-url:
+  download:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install yt-dlp
-        run: pip install yt-dlp
-
-      - name: Fetch fresh proxies
-        id: fetch
+      # 1. Install Python, pip, and other necessary tools
+      - name: Install system dependencies
         run: |
-          curl -s "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all" > proxies.txt
-          # Also fetch from another source as fallback
-          curl -s "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt" >> proxies.txt
-          sort -u proxies.txt -o proxies.txt
-          echo "Total unique proxies: $(wc -l < proxies.txt)"
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ffmpeg zip make
 
-      - name: Find working proxy and get direct URL
-        id: download
+      # 2. Install yt-dlp-proxy (Method by building from source)
+      - name: Install yt-dlp-proxy
         run: |
-          URL="${{ github.event.inputs.url }}"
-          DIRECT_URL=""
-          PROXY_FILE="proxies.txt"
-          
-          # Limit to first 50 to avoid long runtime
-          head -50 "$PROXY_FILE" | while read proxy; do
-            [ -z "$proxy" ] && continue
-            echo "Testing proxy: $proxy"
-            # Try to get direct URL with timeout 15 seconds
-            result=$(timeout 15 yt-dlp --proxy "http://$proxy" -g "$URL" 2>/dev/null | head -1)
-            if [ -n "$result" ] && echo "$result" | grep -qE '^https?://'; then
-              echo "SUCCESS with proxy $proxy"
-              echo "$result" > direct_url.txt
-              echo "direct_url=$result" >> $GITHUB_OUTPUT
-              break
+          git clone https://github.com/Petrprogs/yt-dlp-proxy.git
+          cd yt-dlp-proxy
+          make build
+          sudo make install
+          cd ..
+          rm -rf yt-dlp-proxy
+
+      # 3. Update the proxy list and perform a speed test to find the best one.
+      # This step may take some time as it tests the proxies.
+      - name: Update and test proxy list
+        run: yt-dlp-proxy update --max-workers 10
+
+      # 4. Create directory and download the video using the best found proxy.
+      - name: Download video using found proxy
+        run: |
+          mkdir -p downloads
+          cd downloads
+          # The command forwards all arguments to yt-dlp
+          yt-dlp-proxy -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
+
+      # 5. Split file into 90MB parts if it exceeds 90MB
+      - name: Split large video files
+        run: |
+          cd downloads
+          for file in *; do
+            if [ -f "$file" ] && [ $(stat -c%s "$file") -gt $((90 * 1024 * 1024)) ]; then
+              echo "Splitting $file into 90MB zip parts..."
+              zip -s 90m "${file%.*}.zip" "$file"
+              rm "$file"
             fi
           done
-          
-          if [ ! -f direct_url.txt ]; then
-            echo "No working proxy found"
-            exit 1
-          fi
 
-      - name: Save URL to repository
-        run: |
-          mkdir -p output
-          cp direct_url.txt output/direct_url.txt
-          echo "Original URL: ${{ github.event.inputs.url }}" > output/info.txt
-          cat direct_url.txt >> output/info.txt
-
+      # 6. Commit and push the downloaded file(s) to the repository
       - name: Commit and push
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add output/
-          git diff --staged --quiet || git commit -m "Add direct YouTube URL from ${{ github.event.inputs.url }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add downloads/
+          git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
           git push
