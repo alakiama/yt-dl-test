@@ -1,38 +1,26 @@
-name: Extract YouTube Video URL
+name: Get YouTube Direct URL
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube Video URL'
+        description: 'YouTube URL'
         required: true
-        type: string
 
 permissions:
   contents: write
 
 jobs:
-  extract-url:
+  get-url:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup yt-dlp and bypass bot detection
-        uses: AnimMouse/setup-yt-dlp@v3
+      - uses: AnimMouse/setup-yt-dlp@v3
         with:
-          ejs-node: true # 使用 EJS Node 来应对 JavaScript 挑战
-          
-      - name: Create output directory
-        run: mkdir -p output
-        
-      - name: Extract direct video URL
-        run: |
-          # 使用 -g 参数只输出直接的视频流链接
-          yt-dlp -g "${{ github.event.inputs.url }}" > output/direct_url.txt
-
-      - name: Save and commit URL
+          ejs-node: true
+      - run: mkdir -p output
+      - run: yt-dlp -g "${{ github.event.inputs.url }}" > output/url.txt
       - run: |
           git config user.name "github-actions"
-          git add output/
-          git commit -m "Add direct URL" || true
+          git add output/ && git commit -m "url" || true
           git push
