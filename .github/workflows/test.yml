@@ -1,4 +1,4 @@
-name: Get Direct YouTube Video URL
+name: Extract YouTube Video URL
 
 on:
   workflow_dispatch:
@@ -12,23 +12,25 @@ permissions:
   contents: write
 
 jobs:
-  get-url:
+  extract-url:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install yt-dlp bgutil-ytdlp-pot-provider
-      - run: docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider && sleep 5
-      - name: Extract URL (skip warnings)
+      
+      - name: Setup yt-dlp and bypass bot detection
+        uses: AnimMouse/setup-yt-dlp@v3
+        with:
+          ejs-node: true # 使用 EJS Node 来应对 JavaScript 挑战
+          
+      - name: Create output directory
+        run: mkdir -p output
+        
+      - name: Extract direct video URL
         run: |
-          mkdir -p output
-          # Use 2>/dev/null to hide stderr (warnings), keep only stdout (the URL)
-          DIRECT_URL=$(yt-dlp \
-            --extractor-args "youtube:po_token_provider=bgutil-http://localhost:4416" \
-            --extractor-args "youtube:player_client=android" \
-            -g \
-            "${{ github.event.inputs.url }}" 2>/dev/null | head -1)
-          echo "$DIRECT_URL" > output/stream_url.txt
-          echo "Direct URL: $DIRECT_URL"
+          # 使用 -g 参数只输出直接的视频流链接
+          yt-dlp -g "${{ github.event.inputs.url }}" > output/direct_url.txt
+
+      - name: Save and commit URL
       - run: |
           git config user.name "github-actions"
           git add output/
