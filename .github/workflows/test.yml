@@ -17,16 +17,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install yt-dlp
-        run: sudo apt update && sudo apt install -y yt-dlp
+      - name: Install latest yt-dlp
+        run: |
+          sudo apt update
+          sudo apt install -y python3-pip ffmpeg
+          pip3 install --upgrade yt-dlp
 
       - name: Create videos folder
         run: mkdir -p videos
 
-      - name: Download video into videos/
+      - name: Download video
         run: |
           cd videos
-          yt-dlp -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
+          yt-dlp \
+            --extractor-args "youtube:player-client=android" \
+            --user-agent "Mozilla/5.0 (Linux; Android 13)" \
+            -o "%(title)s.%(ext)s" \
+            "${{ github.event.inputs.url }}"
 
       - name: Commit and push
         run: |
