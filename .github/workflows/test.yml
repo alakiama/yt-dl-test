@@ -1,4 +1,4 @@
-name: 🔻 Download YouTube Video (PO Tokens)
+name: Download YouTube Video
 
 on:
   workflow_dispatch:
@@ -13,38 +13,25 @@ permissions:
 
 jobs:
   download:
-    runs-on: ubuntu-latest
-    env:
-      YT_URL: ${{ github.event.inputs.url }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Install yt-dlp with essential extras for JS challenge solving
-      - name: Install yt-dlp & ffmpeg
-        run: |
-          sudo apt update
-          sudo apt install -y ffmpeg zip
-          pip3 install --upgrade "yt-dlp[default]"
+      - name: Setup yt-dlp (EJS Node + FFmpeg)
+        uses: AnimMouse/setup-yt-dlp@v3
+        with:
+          ejs-node: true
+          ffmpeg: true
 
-      # 2. Start the bgutil PO token provider via Docker (runs HTTP server)
-      - name: Run token provider (bgutil)
-        run: |
-          docker run -d --name bgutil-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
-          sleep 5
+      - name: Create downloads folder
+        run: mkdir -p downloads
 
-      # 3. yt-dlp download with PO token linkage
-      - name: Download video with PO token
+      - name: Download video (no cookies needed)
         run: |
-          mkdir -p downloads
           cd downloads
-          yt-dlp \
-            --extractor-args "youtube:pot-provider=bgutil:http://localhost:4416" \
-            -f "bestvideo+bestaudio/best" \
-            -o "%(title)s.%(ext)s" \
-            "$YT_URL"
+          yt-dlp -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
 
-      # (Optional) Split files into 90MB zip parts
-      - name: Split large files
+      - name: Split large files (>90MB) into zip parts
         run: |
           cd downloads
           for f in *; do
@@ -53,10 +40,8 @@ jobs:
             fi
           done
 
-      # 4. Commit & push results
-      - name: Commit and push
+      - name: Commit and push changes
         run: |
           git config user.name "github-actions"
-          git add downloads/
-          git diff --staged --quiet || git commit -m "Add YouTube video from $YT_URL"
-          git push
+          git config user.email "actions@github.com"
+          git add downloads/ && git commit -m "Video from ${{ github.event.inputs.url }}" || true && git push
