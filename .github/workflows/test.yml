@@ -1,4 +1,4 @@
-name: ⬇️  YouTube Download (PO Token + Zip Split)
+name: ⬇️ YouTube Download (Impersonation + Zip Split)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       split_threshold_mb:
-        description: 'Split zip files larger than this MB (0 = never split)'
+        description: 'Split files larger than this MB (0 = never split)'
         required: false
         default: 90
         type: number
@@ -25,43 +25,33 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies (ffmpeg, zip, Docker, Node.js)
+      - name: Install dependencies (ffmpeg, zip)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zip docker.io nodejs npm
-          npm install -g yarn
-
-      - name: Install latest yt-dlp and bgutil-ytdlp-pot-provider
-        run: |
+          sudo apt-get install -y ffmpeg zip
           pip3 install --upgrade pip
-          pip3 install --upgrade yt-dlp[default]
-          pip3 install bgutil-ytdlp-pot-provider
-
-      - name: Start PO Token Provider (Docker)
-        run: |
-          docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
-          sleep 5
+          pip3 install --upgrade "yt-dlp[default,curl-cffi]"
 
       - name: Create directories
         run: mkdir -p downloads tmp_downloads
 
-      - name: Download YouTube video
+      - name: Download YouTube video with impersonation
         id: download
         run: |
           URL="${{ github.event.inputs.url }}"
           SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
           SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
 
-          echo "⬇️ Downloading $URL using yt-dlp with PO token..."
-          
+          echo "⬇️ Downloading $URL using yt-dlp with browser impersonation..."
+
           cd tmp_downloads
           yt-dlp \
-            --extractor-args "youtube:pot-provider=bgutil:http://localhost:4416" \
-            --extractor-args "youtube:player_client=android" \
+            --impersonate chrome \
+            --extractor-args "youtube:player-client=default" \
             -f "bestvideo+bestaudio/best" \
             -o "%(title)s.%(ext)s" \
             "$URL"
-          
+
           cd ..
 
           DOWNLOADED_FILE=$(ls tmp_downloads/ | head -1)
@@ -71,6 +61,7 @@ jobs:
           echo "📁 Downloaded: $DOWNLOADED_FILE ($(( SIZE / 1024 / 1024 )) MB)"
           echo "BASENAME=$BASENAME" >> $GITHUB_ENV
 
+          # Split if necessary
           if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
             echo "✂️ File exceeds ${SPLIT_THRESHOLD_MB}MB — splitting into zip parts"
             zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "tmp_downloads/$DOWNLOADED_FILE"
@@ -88,9 +79,8 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          echo "🏷️  AVASAM - Committing downloads"
+          echo "🏷️ AVASAM - Committing downloads"
 
-          # Collect all new/modified files under downloads/
           mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/)
 
           TOTAL=${#ALL_FILES[@]}
@@ -113,7 +103,6 @@ jobs:
             git add "${BATCH[@]}"
             git commit -m "[AVASAM] Add YouTube download — batch $BATCH_NUM [skip ci]"
 
-            # Pull with rebase to avoid conflicts
             git pull --rebase origin "$BRANCH"
             git push origin HEAD:"$BRANCH"
 
