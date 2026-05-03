@@ -1,17 +1,71 @@
-name: Test YouTube Download with Free Proxy
+name: Get YouTube Direct URL with Free Proxy
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube URL'
+        description: 'YouTube Video URL'
         required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  test:
+  get-url:
     runs-on: ubuntu-latest
     steps:
-      - run: pip install yt-dlp
-      - run: |
-          # Using a public free proxy (example, likely dead)
-          yt-dlp --proxy "http://103.152.172.40:80" -g "${{ github.event.inputs.url }}"
+      - uses: actions/checkout@v4
+
+      - name: Install yt-dlp
+        run: pip install yt-dlp
+
+      - name: Fetch fresh proxies
+        id: fetch
+        run: |
+          curl -s "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all" > proxies.txt
+          # Also fetch from another source as fallback
+          curl -s "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt" >> proxies.txt
+          sort -u proxies.txt -o proxies.txt
+          echo "Total unique proxies: $(wc -l < proxies.txt)"
+
+      - name: Find working proxy and get direct URL
+        id: download
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          DIRECT_URL=""
+          PROXY_FILE="proxies.txt"
+          
+          # Limit to first 50 to avoid long runtime
+          head -50 "$PROXY_FILE" | while read proxy; do
+            [ -z "$proxy" ] && continue
+            echo "Testing proxy: $proxy"
+            # Try to get direct URL with timeout 15 seconds
+            result=$(timeout 15 yt-dlp --proxy "http://$proxy" -g "$URL" 2>/dev/null | head -1)
+            if [ -n "$result" ] && echo "$result" | grep -qE '^https?://'; then
+              echo "SUCCESS with proxy $proxy"
+              echo "$result" > direct_url.txt
+              echo "direct_url=$result" >> $GITHUB_OUTPUT
+              break
+            fi
+          done
+          
+          if [ ! -f direct_url.txt ]; then
+            echo "No working proxy found"
+            exit 1
+          fi
+
+      - name: Save URL to repository
+        run: |
+          mkdir -p output
+          cp direct_url.txt output/direct_url.txt
+          echo "Original URL: ${{ github.event.inputs.url }}" > output/info.txt
+          cat direct_url.txt >> output/info.txt
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add output/
+          git diff --staged --quiet || git commit -m "Add direct YouTube URL from ${{ github.event.inputs.url }}"
+          git push
