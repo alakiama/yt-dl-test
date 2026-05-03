@@ -1,4 +1,4 @@
-name: Extract YouTube Direct URL
+name: Get Direct YouTube URL (Official API)
 
 on:
   workflow_dispatch:
@@ -18,32 +18,50 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg & yt-dlp
+      - name: Extract Video ID from URL
+        id: get_id
+        run: |
+          VIDEO_ID=$(echo "${{ github.event.inputs.url }}" | grep -oE 'v=([^&]+)' | cut -d'=' -f2)
+          echo "VIDEO_ID=$VIDEO_ID" >> $GITHUB_ENV
+          echo "Extracted Video ID: $VIDEO_ID"
+
+      - name: Download and Run YouTube API Script
+        env:
+          YT_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          VIDEO_ID: ${{ env.VIDEO_ID }}
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg
-          pip3 install --upgrade yt-dlp
+          sudo apt install -y jq curl
+          
+          # Fetch video details from YouTube Data API
+          curl -s "https://www.googleapis.com/youtube/v3/videos?part=contentDetails,player&id=${VIDEO_ID}&key=${YT_API_KEY}" > response.json
+          
+          # Extract the direct embed URL safely
+          DIRECT_URL=$(jq -r '.items[0].player.embedHtml' response.json | grep -oP '(?<=src=")[^"]*')
+          
+          # Fallback extraction in case embedHtml URL isn't available or is malformed
+          if [ -z "$DIRECT_URL" ] || [ "$DIRECT_URL" == "null" ]; then
+            DIRECT_URL="https://www.youtube.com/embed/${VIDEO_ID}"
+            echo "API embedHtml URL not found (maybe API key issue or API response missing). Using fallback URL: $DIRECT_URL"
+          fi
 
-      - name: Get Direct Video URL
-        id: get_url
-        env:
-          YT_URL: ${{ github.event.inputs.url }}
-        run: |
-          # This will print the direct URL so we can capture it.
-          DIRECT_URL=$(yt-dlp -g --extractor-args "youtube:player-client=android" "$YT_URL" | head -1)
           echo "DIRECT_URL=$DIRECT_URL" >> $GITHUB_ENV
-          echo "The direct URL is: $DIRECT_URL"
+          echo "Direct URL: $DIRECT_URL"
 
-      - name: Save URL to a Text File (Optional)
+      - name: Save URL to Repository
         run: |
           mkdir -p output
-          echo "URL: ${{ github.event.inputs.url }}" > output/url_info.txt
-          echo "Extracted Direct Link: $DIRECT_URL" >> output/url_info.txt
+          echo "Video URL: ${{ github.event.inputs.url }}" > output/direct_url.txt
+          echo "Direct Streaming URL: $DIRECT_URL" >> output/direct_url.txt
+          echo " " >> output/direct_url.txt
+          echo "Note: This is an embed URL provided by YouTube's official API." >> output/direct_url.txt
+          echo "It needs to be processed further to get actual streamable video file URLs." >> output/direct_url.txt
+          echo "For more info, check: https://stackoverflow.com/questions/42573645" >> output/direct_url.txt
 
       - name: Commit and Push URL Info
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add output/url_info.txt
-          git diff --staged --quiet || git commit -m "Extracted direct URL for ${{ github.event.inputs.url }}"
+          git add output/direct_url.txt
+          git diff --staged --quiet || git commit -m "Extracted direct embed URL for ${{ github.event.inputs.url }}"
           git push
