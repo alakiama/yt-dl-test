@@ -15,9 +15,10 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install latest yt-dlp
+      - name: Install latest yt-dlp and ffmpeg
         run: |
           sudo apt update
           sudo apt install -y python3-pip ffmpeg
@@ -26,22 +27,25 @@ jobs:
       - name: Create videos folder
         run: mkdir -p videos
 
-      - name: Set up cookies
+      - name: Write cookies file from secret
         run: |
           echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+          # Verify first line (optional, for debugging)
+          head -1 cookies.txt
 
-      - name: Download video
+      - name: Download YouTube video
         run: |
           cd videos
           yt-dlp \
             --cookies ../cookies.txt \
+            --extractor-args "youtube:player-client=android" \
             -o "%(title)s.%(ext)s" \
             "${{ github.event.inputs.url }}"
 
-      - name: Commit and push
+      - name: Commit and push downloaded video
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add videos/
-          git commit -m "Add YouTube video" || echo "No changes"
+          git commit -m "Add YouTube video from ${{ github.event.inputs.url }}" || echo "No changes to commit"
           git push
