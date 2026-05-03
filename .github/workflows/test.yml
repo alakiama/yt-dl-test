@@ -1,4 +1,4 @@
-name: Download YouTube Video (EJS Node only)
+name: Download YouTube Video (Cookie + Split)
 
 on:
   workflow_dispatch:
@@ -15,26 +15,36 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup yt-dlp (EJS Node + FFmpeg enabled by default)
+      - name: Setup yt-dlp (with EJS Node and FFmpeg)
         uses: AnimMouse/setup-yt-dlp@v3
-        # ejs-node and ffmpeg are true by default – no need to specify
+        with:
+          ejs-node: true
+          ffmpeg: true
 
-      - name: Create downloads folder
+      - name: Inject YouTube cookies (decoded from secret)
+        uses: AnimMouse/setup-yt-dlp/cookies@v3
+        with:
+          cookies: ${{ secrets.YOUTUBE_COOKIES }}
+
+      - name: Create download folder
         run: mkdir -p downloads
 
-      - name: Download video (no cookies, relies on EJS Node)
+      - name: Download video
         run: |
           cd downloads
           yt-dlp -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
 
-      - name: Split files >90MB into zip parts
+      - name: Split files larger than 90MB into zip parts
         run: |
           cd downloads
-          for f in *; do
-            if [ -f "$f" ] && [ $(stat -c%s "$f") -gt $((90*1024*1024)) ]; then
-              zip -s 90m "${f%.*}.zip" "$f" && rm "$f"
+          for file in *; do
+            if [ -f "$file" ] && [ $(stat -c%s "$file") -gt $((90 * 1024 * 1024)) ]; then
+              echo "Splitting $file (size > 90 MB)"
+              zip -s 90m "${file%.*}.zip" "$file"
+              rm "$file"
             fi
           done
 
