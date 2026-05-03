@@ -1,4 +1,4 @@
-name: 🎬 YouTube Downloader (via Cobalt + WARP)
+name: 🎬 YouTube Download (yt-dlp + WARP)
 
 on:
   workflow_dispatch:
@@ -7,28 +7,11 @@ on:
         description: 'YouTube video URL'
         required: true
         type: string
-      quality:
-        description: 'Video quality'
+      format:
+        description: 'Format (best, bestaudio, 1080p, 720p)'
         required: false
-        default: '1080'
-        type: choice
-        options:
-          - max
-          - 2160
-          - 1440
-          - 1080
-          - 720
-          - 480
-          - 360
-      download_mode:
-        description: 'Download mode'
-        required: false
-        default: 'auto'
-        type: choice
-        options:
-          - auto
-          - audio
-          - mute
+        default: 'best'
+        type: string
       split_threshold_mb:
         description: 'Split files larger than this MB (0 = never split)'
         required: false
@@ -36,143 +19,70 @@ on:
         type: number
 
 jobs:
-  download-youtube:
+  download:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     
-    services:
-      # Cloudflare WARP container for IP bypass
-      warp:
-        image: ghcr.io/monius/docker-warp-socks:latest
-        options: --cap-add NET_ADMIN --cap-add SYS_MODULE --sysctl net.ipv4.conf.all.src_valid_mark=1 --sysctl net.ipv4.ip_forward=1
-        ports:
-          - 1080:1080
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Wait for WARP to be ready
+      - name: Setup Cloudflare WARP
         run: |
-          echo "⏳ Waiting for Cloudflare WARP to initialize..."
-          sleep 15
-          # Test WARP connection
-          curl --socks5 127.0.0.1:1080 -s https://cloudflare.com/cdn-cgi/trace | grep -q "warp=on" && echo "✅ WARP is active!" || echo "⚠️ WARP check inconclusive, proceeding anyway..."
-
-      - name: Install dependencies
-        run: |
+          # Install WARP
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
           sudo apt-get update
-          sudo apt-get install -y aria2 zip curl jq
+          sudo apt-get install -y cloudflare-warp
+          
+          # Register and connect WARP
+          warp-cli --accept-tos registration new
+          warp-cli --accept-tos mode proxy
+          warp-cli --accept-tos proxy port 40000
+          warp-cli --accept-tos connect
+          
+          sleep 5
+          echo "✅ WARP Status:"
+          warp-cli status
 
-      - name: Get video info from Cobalt API
-        id: cobalt
+      - name: Install yt-dlp
         run: |
-          YOUTUBE_URL="${{ github.event.inputs.youtube_url }}"
-          QUALITY="${{ github.event.inputs.quality }}"
-          DOWNLOAD_MODE="${{ github.event.inputs.download_mode }}"
+          sudo apt-get install -y python3-pip ffmpeg zip
+          pip3 install --upgrade yt-dlp
+
+      - name: Download video via WARP
+        run: |
+          URL="${{ github.event.inputs.youtube_url }}"
+          FORMAT="${{ github.event.inputs.format }}"
+          SPLIT_MB="${{ github.event.inputs.split_threshold_mb }}"
+          SPLIT_BYTES=$(( SPLIT_MB * 1024 * 1024 ))
+          
+          mkdir -p videos tmp_downloads
           
           echo "🏷️ AVASAM YouTube Downloader"
-          echo "🌐 https://avasam.ir"
-          echo ""
-          echo "📹 Fetching: $YOUTUBE_URL"
-          
-          # List of public Cobalt API instances to try
-          COBALT_APIS=(
-            "https://api.cobalt.tools"
-            "https://cobalt-api.kwiatekmiki.com"
-            "https://cobalt-api.hyper.lol"
-          )
-          
-          DIRECT_URL=""
-          FILENAME=""
-          
-          for API in "${COBALT_APIS[@]}"; do
-            echo "🔄 Trying Cobalt API: $API"
-            
-            RESPONSE=$(curl --socks5 127.0.0.1:1080 -s -X POST "$API/" \
-              -H "Accept: application/json" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"url\": \"$YOUTUBE_URL\",
-                \"videoQuality\": \"$QUALITY\",
-                \"downloadMode\": \"$DOWNLOAD_MODE\",
-                \"filenameStyle\": \"basic\"
-              }" 2>/dev/null || echo "")
-            
-            echo "Response: $RESPONSE"
-            
-            if [ -n "$RESPONSE" ]; then
-              STATUS=$(echo "$RESPONSE" | jq -r '.status // "error"')
-              
-              if [ "$STATUS" = "tunnel" ] || [ "$STATUS" = "redirect" ]; then
-                DIRECT_URL=$(echo "$RESPONSE" | jq -r '.url // empty')
-                FILENAME=$(echo "$RESPONSE" | jq -r '.filename // "video.mp4"')
-                
-                if [ -n "$DIRECT_URL" ] && [ "$DIRECT_URL" != "null" ]; then
-                  echo "✅ Got direct URL from $API"
-                  break
-                fi
-              elif [ "$STATUS" = "picker" ]; then
-                # Handle picker response (multiple formats)
-                DIRECT_URL=$(echo "$RESPONSE" | jq -r '.picker[0].url // empty')
-                FILENAME=$(echo "$RESPONSE" | jq -r '.picker[0].filename // "video.mp4"')
-                if [ -n "$DIRECT_URL" ] && [ "$DIRECT_URL" != "null" ]; then
-                  echo "✅ Got direct URL from picker at $API"
-                  break
-                fi
-              else
-                ERROR=$(echo "$RESPONSE" | jq -r '.error.code // .error // "unknown"')
-                echo "⚠️ API returned error: $ERROR"
-              fi
-            fi
-          done
-          
-          if [ -z "$DIRECT_URL" ] || [ "$DIRECT_URL" = "null" ]; then
-            echo "❌ Failed to get download URL from all Cobalt APIs"
-            echo "This usually means:"
-            echo "  1. YouTube is blocking this request"
-            echo "  2. The Cobalt APIs require authentication now"
-            echo "  3. The video is geo-restricted or private"
-            exit 1
-          fi
-          
-          echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
-          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
-
-      - name: Download video
-        run: |
-          DIRECT_URL="${{ steps.cobalt.outputs.direct_url }}"
-          FILENAME="${{ steps.cobalt.outputs.filename }}"
-          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
-          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
-          
-          mkdir -p downloads tmp_downloads videos
-          
-          echo "⬇️ Downloading: $FILENAME"
+          echo "📹 Downloading: $URL"
           
           # Download through WARP proxy
-          aria2c \
-            --all-proxy="socks5://127.0.0.1:1080" \
-            --split=4 \
-            --max-connection-per-server=4 \
-            --min-split-size=20M \
-            --dir="tmp_downloads" \
-            --out="$FILENAME" \
-            "$DIRECT_URL"
+          yt-dlp \
+            --proxy "socks5://127.0.0.1:40000" \
+            --format "$FORMAT" \
+            --merge-output-format mp4 \
+            --output "tmp_downloads/%(title)s.%(ext)s" \
+            --no-playlist \
+            --retries 5 \
+            --fragment-retries 5 \
+            "$URL"
           
-          # Handle splitting large files
+          # Handle file splitting
           for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
             SIZE=$(stat -c%s "$FILE")
             BASENAME=$(basename "$FILE")
             
-            if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
-              echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts"
-              zip -0 -s "${SPLIT_THRESHOLD_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
-              echo "✅ Parts created: $(ls videos/${BASENAME}.z* 2>/dev/null | wc -l)"
+            if [ "$SPLIT_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_BYTES" ]; then
+              echo "✂️ Splitting $BASENAME ($(( SIZE / 1024 / 1024 ))MB)..."
+              zip -0 -s "${SPLIT_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
             else
               cp "$FILE" "videos/$BASENAME"
             fi
@@ -184,26 +94,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard videos/)
-          TOTAL=${#ALL_FILES[@]}
-          
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "Nothing to commit"
-            exit 0
-          fi
-          
-          BATCH_SIZE=5
-          BATCH_NUM=0
-          BRANCH="${GITHUB_REF_NAME}"
-          
-          for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
-            BATCH_NUM=$(( BATCH_NUM + 1 ))
-            BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
-            
-            git add "${BATCH[@]}"
-            git commit -m "[AVASAM] YouTube download — batch $BATCH_NUM [skip ci]"
-            git pull --rebase origin "$BRANCH"
-            git push origin HEAD:"$BRANCH"
-          done
-          
-          echo "🎉 Downloaded and pushed successfully — AVASAM (https://avasam.ir)"
+          git add videos/
+          git commit -m "[AVASAM] YouTube download [skip ci]" || exit 0
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
