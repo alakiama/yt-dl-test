@@ -1,181 +1,98 @@
-name: 🎬 YouTube Video Downloader
+name: ⬇️  YouTube Download (PO Token + Zip Split)
 
 on:
   workflow_dispatch:
     inputs:
-      video_url:
+      url:
         description: 'YouTube video URL'
         required: true
         type: string
-      quality:
-        description: 'Video quality'
-        required: false
-        default: '720'
-        type: choice
-        options:
-          - 'best'
-          - '1080'
-          - '720'
-          - '480'
-          - '360'
-          - 'audio'
       split_threshold_mb:
-        description: 'Split files larger than this MB (0 = never split, recommended: 90)'
+        description: 'Split zip files larger than this MB (0 = never split)'
         required: false
         default: 90
         type: number
 
+permissions:
+  contents: write
+
 jobs:
-  download-video:
+  download-and-split:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    services:
-      # PO Token generator service
-      pot-server:
-        image: brainicism/bgutil-ytdlp-pot-provider:latest
-        ports:
-          - 8080:8080
-
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
+      - name: Install yt-dlp, ffmpeg, zip and docker
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zip python3-pip curl
-
-          # Install yt-dlp and the POT provider plugin
+          sudo apt-get install -y ffmpeg zip docker.io
           pip3 install --upgrade yt-dlp
           pip3 install bgutil-ytdlp-pot-provider
 
-          yt-dlp --version
-
-      - name: Wait for PO Token server
+      - name: Start PO Token Provider (Docker)
         run: |
-          echo "⏳ Waiting for PO Token server to be ready..."
-          for i in {1..60}; do
-            if curl -s http://localhost:8080/ > /dev/null 2>&1; then
-              echo "✅ PO Token server is ready!"
-              exit 0
-            fi
-            echo "Waiting... ($i/60)"
-            sleep 2
-          done
-          echo "⚠️ Server may not be fully ready, continuing anyway..."
+          docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
+          sleep 5   # wait for server to be ready
 
-      - name: Test PO Token server
+      - name: AVASAM Downloader - https://avasam.ir
         run: |
-          echo "🧪 Testing PO Token server..."
-          curl -v http://localhost:8080/ || true
-          echo ""
-
-      - name: AVASAM YouTube Downloader - https://avasam.ir
-        run: |
-          echo "🏷️  AVASAM - YouTube Video Download Solution"
+          echo "🏷️  AVASAM - YouTube Download with PO Token"
           echo "🌐 https://avasam.ir"
-          echo "🔐 Using automatic PO Token generation"
-          echo ""
 
       - name: Download YouTube video
-        env:
-          # Configure the POT plugin to use the Docker service
-          BGUTIL_POT_HTTP_BASE_URL: "http://localhost:8080"
+        id: download
         run: |
-          VIDEO_URL="${{ github.event.inputs.video_url }}"
-          QUALITY="${{ github.event.inputs.quality }}"
+          mkdir -p downloads tmp_downloads
+          URL="${{ github.event.inputs.url }}"
           SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
           SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
 
-          echo "🏷️  AVASAM (https://avasam.ir) - YouTube Downloader"
-          echo "📺 Video URL: $VIDEO_URL"
-          echo "🎯 Quality: $QUALITY"
-          echo "🔗 PO Token Server: http://localhost:8080"
-          echo ""
-
-          mkdir -p videos tmp_downloads
-
-          # Set format based on quality
-          case "$QUALITY" in
-            "best")
-              FORMAT_STRING="bv*+ba/b"
-              ;;
-            "1080")
-              FORMAT_STRING="bv*[height<=1080]+ba/b[height<=1080]"
-              ;;
-            "720")
-              FORMAT_STRING="bv*[height<=720]+ba/b[height<=720]"
-              ;;
-            "480")
-              FORMAT_STRING="bv*[height<=480]+ba/b[height<=480]"
-              ;;
-            "360")
-              FORMAT_STRING="bv*[height<=360]+ba/b[height<=360]"
-              ;;
-            "audio")
-              FORMAT_STRING="ba/b"
-              ;;
-          esac
-
-          echo "⬇️ Downloading with yt-dlp + automatic PO Token..."
-
-          # Download using the POT provider plugin with explicit server URL
+          echo "⬇️ Downloading $URL using yt-dlp with PO token..."
+          # Use best quality, output template includes title
+          cd tmp_downloads
           yt-dlp \
-            --format "$FORMAT_STRING" \
-            --merge-output-format mp4 \
-            --output "tmp_downloads/%(title)s.%(ext)s" \
-            --no-playlist \
-            --restrict-filenames \
-            --extractor-args "youtube:player_client=web,getpot_bgutil_baseurl=http://localhost:8080" \
-            --retries 5 \
-            --verbose \
-            "$VIDEO_URL"
+            --extractor-args "youtube:po_token_provider=bgutil-http://localhost:4416" \
+            --extractor-args "youtube:player_client=android" \
+            -f "bestvideo+bestaudio/best" \
+            -o "%(title)s.%(ext)s" \
+            "$URL"
+          cd ..
 
-          echo "✅ Download completed!"
+          # Get the downloaded file name (only one file expected)
+          DOWNLOADED_FILE=$(ls tmp_downloads/ | head -1)
+          SIZE=$(stat -c%s "tmp_downloads/$DOWNLOADED_FILE")
+          BASENAME="${DOWNLOADED_FILE%.*}"
 
-          # Check if any files were downloaded
-          if [ -z "$(ls -A tmp_downloads 2>/dev/null)" ]; then
-            echo "❌ No files were downloaded"
-            exit 1
+          echo "📁 Downloaded: $DOWNLOADED_FILE ($(( SIZE / 1024 / 1024 )) MB)"
+          echo "BASENAME=$BASENAME" >> $GITHUB_ENV
+
+          # Normal mode: split into zip parts if larger than threshold
+          if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
+            echo "✂️ File exceeds ${SPLIT_THRESHOLD_MB}MB — splitting into zip parts"
+            # Create a split zip archive (parts: .z01, .z02, ...)
+            zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "tmp_downloads/$DOWNLOADED_FILE"
+            echo "✅ Parts: $(ls downloads/${BASENAME}.z* 2>/dev/null | wc -l)"
+            rm -rf tmp_downloads
+          else
+            # No split needed – just move the file as is
+            echo "📦 File within limit – moving directly"
+            mv "tmp_downloads/$DOWNLOADED_FILE" "downloads/$DOWNLOADED_FILE"
+            rm -rf tmp_downloads
           fi
 
-          # Handle splitting large files
-          for FILE in tmp_downloads/*; do
-            [ -f "$FILE" ] || continue
-            SIZE=$(stat -c%s "$FILE")
-            BASENAME=$(basename "$FILE")
-
-            echo "📄 Processing: $BASENAME ($(( SIZE / 1024 / 1024 ))MB)"
-
-            if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
-              echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts"
-              zip -0 -s "${SPLIT_THRESHOLD_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
-              PART_COUNT=$(ls videos/${BASENAME}.z* 2>/dev/null | wc -l)
-              echo "✅ Split into $PART_COUNT parts"
-            else
-              cp "$FILE" "videos/$BASENAME"
-              echo "✅ Copied to videos folder"
-            fi
-          done
-
-          rm -rf tmp_downloads
-          echo ""
-          echo "📦 Files ready in videos folder:"
-          ls -lh videos/
-
-      - name: Commit & Push video files (AVASAM)
+      - name: Commit & Push (batches of 5 files)
         run: |
           BRANCH="${GITHUB_REF_NAME}"
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          echo "🏷️  AVASAM (https://avasam.ir) - Committing video files"
+          echo "🏷️  AVASAM - Committing downloads"
 
-          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard videos/)
+          # Collect all new/modified files under downloads/
+          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/)
 
           TOTAL=${#ALL_FILES[@]}
           echo "📦 Total files to push: $TOTAL"
@@ -185,7 +102,7 @@ jobs:
             exit 0
           fi
 
-          BATCH_SIZE=3
+          BATCH_SIZE=5
           BATCH_NUM=0
 
           for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
@@ -195,13 +112,13 @@ jobs:
             echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
 
             git add "${BATCH[@]}"
-            git commit -m "[AVASAM] 🎬 YouTube video download — batch $BATCH_NUM [skip ci]"
+            git commit -m "[AVASAM] Add YouTube download — batch $BATCH_NUM [skip ci]"
 
+            # Pull with rebase to avoid conflicts
             git pull --rebase origin "$BRANCH"
             git push origin HEAD:"$BRANCH"
 
             echo "✅ Batch $BATCH_NUM pushed"
           done
 
-          echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es)"
-          echo "🏷️  AVASAM (https://avasam.ir) - Download Complete!"
+          echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es) — AVASAM (https://avasam.ir)"
