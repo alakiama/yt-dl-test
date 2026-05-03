@@ -1,26 +1,181 @@
-name: Get YouTube Direct URL
+name: 🎬 YouTube Video Downloader
 
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'YouTube URL'
+      video_url:
+        description: 'YouTube video URL (supports youtube.com and youtu.be links)'
         required: true
-
-permissions:
-  contents: write
+        type: string
+      quality:
+        description: 'Video quality'
+        required: false
+        default: 'best'
+        type: choice
+        options:
+          - best
+          - 1080p
+          - 720p
+          - 480p
+          - audio_only
+      format:
+        description: 'Output format'
+        required: false
+        default: 'mp4'
+        type: choice
+        options:
+          - mp4
+          - mkv
+          - webm
+      split_threshold_mb:
+        description: 'Split files larger than this MB (0 = never split, recommended: 90)'
+        required: false
+        default: 90
+        type: number
 
 jobs:
-  get-url:
+  download-video:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: AnimMouse/setup-yt-dlp@v3
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          ejs-node: true
-      - run: mkdir -p output
-      - run: yt-dlp -g "${{ github.event.inputs.url }}" > output/url.txt
-      - run: |
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip
+          # Install latest yt-dlp
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+          yt-dlp --version
+
+      - name: AVASAM YouTube Downloader - https://avasam.ir
+        run: |
+          echo "🏷️  AVASAM - YouTube Video Download Solution"
+          echo "🌐 https://avasam.ir"
+          echo ""
+
+      - name: Download YouTube video
+        run: |
+          VIDEO_URL="${{ github.event.inputs.video_url }}"
+          QUALITY="${{ github.event.inputs.quality }}"
+          FORMAT="${{ github.event.inputs.format }}"
+          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
+          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
+
+          echo "🏷️  AVASAM (https://avasam.ir) - YouTube Downloader"
+          echo "📺 Video URL: $VIDEO_URL"
+          echo "🎯 Quality: $QUALITY"
+          echo "📁 Format: $FORMAT"
+          echo "✂️ Split threshold: $SPLIT_THRESHOLD_MB MB"
+          echo ""
+
+          mkdir -p videos tmp_downloads
+
+          # Set quality format string for yt-dlp
+          case "$QUALITY" in
+            "best")
+              FORMAT_STRING="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+              ;;
+            "1080p")
+              FORMAT_STRING="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+              ;;
+            "720p")
+              FORMAT_STRING="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+              ;;
+            "480p")
+              FORMAT_STRING="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]"
+              ;;
+            "audio_only")
+              FORMAT_STRING="bestaudio[ext=m4a]/bestaudio/best"
+              FORMAT="m4a"
+              ;;
+          esac
+
+          echo "⬇️ Starting download with yt-dlp..."
+          echo "Format string: $FORMAT_STRING"
+
+          # Download video with yt-dlp
+          yt-dlp \
+            --format "$FORMAT_STRING" \
+            --merge-output-format "$FORMAT" \
+            --output "tmp_downloads/%(title)s.%(ext)s" \
+            --no-playlist \
+            --restrict-filenames \
+            --no-overwrites \
+            --retries 3 \
+            --fragment-retries 3 \
+            "$VIDEO_URL"
+
+          echo "✅ Download completed!"
+          echo ""
+
+          # Handle splitting large files
+          for FILE in tmp_downloads/*; do
+            [ -f "$FILE" ] || continue
+            SIZE=$(stat -c%s "$FILE")
+            BASENAME=$(basename "$FILE")
+
+            echo "📄 Processing: $BASENAME ($(( SIZE / 1024 / 1024 ))MB)"
+
+            if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
+              echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts"
+              # Create a zip split into parts
+              zip -0 -s "${SPLIT_THRESHOLD_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
+              PART_COUNT=$(ls videos/${BASENAME}.z* 2>/dev/null | wc -l)
+              echo "✅ Split into $PART_COUNT parts"
+            else
+              cp "$FILE" "videos/$BASENAME"
+              echo "✅ Copied to videos folder"
+            fi
+          done
+
+          rm -rf tmp_downloads
+          echo ""
+          echo "📦 Files ready in videos folder:"
+          ls -lh videos/
+
+      - name: Commit & Push video files (AVASAM)
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
           git config user.name "github-actions"
-          git add output/ && git commit -m "url" || true
-          git push
+          git config user.email "github-actions@github.com"
+
+          echo "🏷️  AVASAM (https://avasam.ir) - Committing video files"
+
+          # Collect all new/modified files under videos/
+          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard videos/)
+
+          TOTAL=${#ALL_FILES[@]}
+          echo "📦 Total files to push: $TOTAL"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+
+          BATCH_SIZE=3
+          BATCH_NUM=0
+
+          for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
+            BATCH_NUM=$(( BATCH_NUM + 1 ))
+            BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
+
+            echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
+
+            git add "${BATCH[@]}"
+            git commit -m "[AVASAM] 🎬 YouTube video download — batch $BATCH_NUM [skip ci]"
+
+            # Pull with rebase before each push to avoid conflicts
+            git pull --rebase origin "$BRANCH"
+            git push origin HEAD:"$BRANCH"
+
+            echo "✅ Batch $BATCH_NUM pushed"
+          done
+
+          echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es)"
+          echo "🏷️  AVASAM (https://avasam.ir) - Download Complete!"
