@@ -1,0 +1,37 @@
+name: Download YouTube Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube URL'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yt-dlp
+        run: sudo apt update && sudo apt install -y yt-dlp
+
+      - name: Create videos folder
+        run: mkdir -p videos
+
+      - name: Download video into videos/
+        run: |
+          cd videos
+          yt-dlp -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add videos/
+          git commit -m "Add YouTube video" || echo "No changes"
+          git push
