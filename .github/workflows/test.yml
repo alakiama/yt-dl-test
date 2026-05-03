@@ -25,43 +25,45 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install yt-dlp, ffmpeg, zip and docker
+      - name: Install dependencies (ffmpeg, zip, Docker, Node.js)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zip docker.io
-          pip3 install --upgrade yt-dlp
+          sudo apt-get install -y ffmpeg zip docker.io nodejs npm
+          npm install -g yarn
+
+      - name: Install latest yt-dlp and bgutil-ytdlp-pot-provider
+        run: |
+          pip3 install --upgrade pip
+          pip3 install --upgrade yt-dlp[default]
           pip3 install bgutil-ytdlp-pot-provider
 
       - name: Start PO Token Provider (Docker)
         run: |
           docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
-          sleep 5   # wait for server to be ready
+          sleep 5
 
-      - name: AVASAM Downloader - https://avasam.ir
-        run: |
-          echo "🏷️  AVASAM - YouTube Download with PO Token"
-          echo "🌐 https://avasam.ir"
+      - name: Create directories
+        run: mkdir -p downloads tmp_downloads
 
       - name: Download YouTube video
         id: download
         run: |
-          mkdir -p downloads tmp_downloads
           URL="${{ github.event.inputs.url }}"
           SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
           SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
 
           echo "⬇️ Downloading $URL using yt-dlp with PO token..."
-          # Use best quality, output template includes title
+          
           cd tmp_downloads
           yt-dlp \
-            --extractor-args "youtube:po_token_provider=bgutil-http://localhost:4416" \
+            --extractor-args "youtube:pot-provider=bgutil:http://localhost:4416" \
             --extractor-args "youtube:player_client=android" \
             -f "bestvideo+bestaudio/best" \
             -o "%(title)s.%(ext)s" \
             "$URL"
+          
           cd ..
 
-          # Get the downloaded file name (only one file expected)
           DOWNLOADED_FILE=$(ls tmp_downloads/ | head -1)
           SIZE=$(stat -c%s "tmp_downloads/$DOWNLOADED_FILE")
           BASENAME="${DOWNLOADED_FILE%.*}"
@@ -69,16 +71,13 @@ jobs:
           echo "📁 Downloaded: $DOWNLOADED_FILE ($(( SIZE / 1024 / 1024 )) MB)"
           echo "BASENAME=$BASENAME" >> $GITHUB_ENV
 
-          # Normal mode: split into zip parts if larger than threshold
           if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
             echo "✂️ File exceeds ${SPLIT_THRESHOLD_MB}MB — splitting into zip parts"
-            # Create a split zip archive (parts: .z01, .z02, ...)
             zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "tmp_downloads/$DOWNLOADED_FILE"
             echo "✅ Parts: $(ls downloads/${BASENAME}.z* 2>/dev/null | wc -l)"
             rm -rf tmp_downloads
           else
-            # No split needed – just move the file as is
-            echo "📦 File within limit – moving directly"
+            echo "📦 File within limit — moving directly"
             mv "tmp_downloads/$DOWNLOADED_FILE" "downloads/$DOWNLOADED_FILE"
             rm -rf tmp_downloads
           fi
