@@ -13,7 +13,7 @@ on:
         default: '720'
         type: choice
         options:
-          - '2160'
+          - 'best'
           - '1080'
           - '720'
           - '480'
@@ -39,7 +39,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq aria2 zip ffmpeg
+          sudo apt-get install -y ffmpeg zip python3-pip
+
+          # Install yt-dlp via pip (more up to date)
+          pip3 install --upgrade yt-dlp
+
+          yt-dlp --version
 
       - name: AVASAM YouTube Downloader - https://avasam.ir
         run: |
@@ -47,97 +52,104 @@ jobs:
           echo "🌐 https://avasam.ir"
           echo ""
 
-      - name: Get download link from Cobalt API
-        id: cobalt
+      - name: Download YouTube video
         run: |
           VIDEO_URL="${{ github.event.inputs.video_url }}"
           QUALITY="${{ github.event.inputs.quality }}"
+          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
+          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
 
           echo "🏷️  AVASAM (https://avasam.ir) - YouTube Downloader"
           echo "📺 Video URL: $VIDEO_URL"
-          echo "🎯 Quality: ${QUALITY}p"
+          echo "🎯 Quality: $QUALITY"
           echo ""
-
-          # Set video quality for Cobalt API
-          if [ "$QUALITY" = "audio" ]; then
-            DOWNLOAD_MODE="audio"
-            VIDEO_QUALITY="720"
-          else
-            DOWNLOAD_MODE="auto"
-            VIDEO_QUALITY="$QUALITY"
-          fi
-
-          echo "⬇️ Getting download link from Cobalt..."
-
-          # Call Cobalt API to get direct download link
-          RESPONSE=$(curl -s -X POST "https://api.cobalt.tools/" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"url\": \"$VIDEO_URL\",
-              \"videoQuality\": \"$VIDEO_QUALITY\",
-              \"downloadMode\": \"$DOWNLOAD_MODE\",
-              \"filenameStyle\": \"basic\"
-            }")
-
-          echo "API Response: $RESPONSE"
-
-          # Check for errors
-          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
-
-          if [ "$STATUS" = "error" ]; then
-            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.code // .text // "Unknown error"')
-            echo "❌ Error: $ERROR_MSG"
-            exit 1
-          fi
-
-          # Extract download URL
-          DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r '.url // empty')
-
-          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-            # Check if it's a picker response (multiple options)
-            PICKER_URL=$(echo "$RESPONSE" | jq -r '.picker[0].url // empty')
-            if [ -n "$PICKER_URL" ] && [ "$PICKER_URL" != "null" ]; then
-              DOWNLOAD_URL="$PICKER_URL"
-            else
-              echo "❌ Could not get download URL"
-              echo "Response: $RESPONSE"
-              exit 1
-            fi
-          fi
-
-          echo "✅ Got download link!"
-          echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
-
-      - name: Download video file
-        run: |
-          DOWNLOAD_URL="${{ steps.cobalt.outputs.download_url }}"
-          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
-          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
-          QUALITY="${{ github.event.inputs.quality }}"
 
           mkdir -p videos tmp_downloads
 
-          # Generate filename
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          if [ "$QUALITY" = "audio" ]; then
-            FILENAME="youtube_audio_${TIMESTAMP}.mp3"
+          # Set format based on quality
+          case "$QUALITY" in
+            "best")
+              FORMAT_STRING="bv*+ba/b"
+              ;;
+            "1080")
+              FORMAT_STRING="bv*[height<=1080]+ba/b[height<=1080]"
+              ;;
+            "720")
+              FORMAT_STRING="bv*[height<=720]+ba/b[height<=720]"
+              ;;
+            "480")
+              FORMAT_STRING="bv*[height<=480]+ba/b[height<=480]"
+              ;;
+            "360")
+              FORMAT_STRING="bv*[height<=360]+ba/b[height<=360]"
+              ;;
+            "audio")
+              FORMAT_STRING="ba/b"
+              ;;
+          esac
+
+          echo "⬇️ Downloading with yt-dlp (trying multiple methods)..."
+
+          # Try Method 1: tv_embedded client (usually bypasses bot detection)
+          echo "📡 Method 1: Using tv_embedded client..."
+          if yt-dlp \
+            --format "$FORMAT_STRING" \
+            --merge-output-format mp4 \
+            --output "tmp_downloads/%(title)s.%(ext)s" \
+            --no-playlist \
+            --restrict-filenames \
+            --extractor-args "youtube:player_client=tv_embedded" \
+            --no-warnings \
+            --retries 3 \
+            "$VIDEO_URL" 2>&1; then
+            echo "✅ Method 1 succeeded!"
           else
-            FILENAME="youtube_${QUALITY}p_${TIMESTAMP}.mp4"
+            echo "⚠️ Method 1 failed, trying Method 2..."
+            
+            # Try Method 2: web client with different options
+            echo "📡 Method 2: Using web_creator client..."
+            if yt-dlp \
+              --format "$FORMAT_STRING" \
+              --merge-output-format mp4 \
+              --output "tmp_downloads/%(title)s.%(ext)s" \
+              --no-playlist \
+              --restrict-filenames \
+              --extractor-args "youtube:player_client=web_creator" \
+              --no-warnings \
+              --retries 3 \
+              "$VIDEO_URL" 2>&1; then
+              echo "✅ Method 2 succeeded!"
+            else
+              echo "⚠️ Method 2 failed, trying Method 3..."
+              
+              # Try Method 3: mweb client
+              echo "📡 Method 3: Using mweb client..."
+              if yt-dlp \
+                --format "$FORMAT_STRING" \
+                --merge-output-format mp4 \
+                --output "tmp_downloads/%(title)s.%(ext)s" \
+                --no-playlist \
+                --restrict-filenames \
+                --extractor-args "youtube:player_client=mweb" \
+                --no-warnings \
+                --retries 3 \
+                "$VIDEO_URL" 2>&1; then
+                echo "✅ Method 3 succeeded!"
+              else
+                echo "❌ All methods failed!"
+                exit 1
+              fi
+            fi
           fi
 
-          echo "⬇️ Downloading: $FILENAME"
-
-          # Download with aria2 for speed
-          aria2c \
-            --split=4 \
-            --max-connection-per-server=4 \
-            --min-split-size=20M \
-            --dir="tmp_downloads" \
-            --out="$FILENAME" \
-            "$DOWNLOAD_URL"
-
+          echo ""
           echo "✅ Download completed!"
+
+          # Check if any files were downloaded
+          if [ -z "$(ls -A tmp_downloads 2>/dev/null)" ]; then
+            echo "❌ No files were downloaded"
+            exit 1
+          fi
 
           # Handle splitting large files
           for FILE in tmp_downloads/*; do
