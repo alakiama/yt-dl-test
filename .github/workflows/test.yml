@@ -1,28 +1,22 @@
-name: Download YouTube Video
-
+name: Download with Proxy
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'YouTube URL'
-        required: true
-
-permissions:
-  contents: write
+      url: { required: true, type: string }
+permissions: { contents: write }
 
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt update && sudo apt install -y ffmpeg && pip3 install yt-dlp
-      - run: mkdir -p videos
-      - name: Use cookie string from secret
-        run: |
-          echo "# Netscape HTTP Cookie File" > cookies.txt
-          echo "${{ secrets.YOUTUBE_COOKIE_STRING }}" | tr ';' '\n' | while read c; do
-            c=$(echo "$c" | sed 's/^[ \t]*//')
-            [ -n "$c" ] && echo ".youtube.com TRUE / FALSE 0 $(echo $c | cut -d= -f1) $(echo $c | cut -d= -f2-)" >> cookies.txt
-          done
-      - run: cd videos && yt-dlp --cookies ../cookies.txt "${{ github.event.inputs.url }}"
-      - run: git config user.name github-actions && git add videos/ && git commit -m "video" || true && git push
+      - run: pip install yt-dlp-proxy
+      - run: yt-dlp-proxy update  # fetch & test proxies
+      - run: |
+          mkdir -p videos
+          cd videos
+          yt-dlp-proxy ${{ github.event.inputs.url }}
+      - run: |
+          git config user.name github-actions
+          git add videos/ && git commit -m "video" || true
+          git push
