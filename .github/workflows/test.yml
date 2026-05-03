@@ -1,18 +1,42 @@
-name: Download with Lux
-on: workflow_dispatch
-inputs: { url: { required: true, type: string } }
-permissions: { contents: write }
+name: Download YouTube Video with Lux
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: |
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Lux
+        run: |
           wget https://github.com/iaw002/lux/releases/latest/download/lux_linux_amd64.tar.gz
           tar -xzf lux_linux_amd64.tar.gz
           sudo mv lux /usr/local/bin/
-      - run: mkdir -p videos && lux -o ./videos "${{ github.event.inputs.url }}"
-      - run: |
-          git config user.name github-actions
-          git add videos/ && git commit -m "video" || true
+          rm lux_linux_amd64.tar.gz
+
+      - name: Create videos folder
+        run: mkdir -p videos
+
+      - name: Download video with Lux
+        run: |
+          cd videos
+          lux "${{ github.event.inputs.url }}"
+
+      - name: Commit and push video
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add videos/
+          git diff --staged --quiet || git commit -m "Download YouTube video from ${{ github.event.inputs.url }}"
           git push
