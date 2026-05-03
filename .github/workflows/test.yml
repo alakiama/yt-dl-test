@@ -47,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zip python3-pip
+          sudo apt-get install -y ffmpeg zip python3-pip curl
 
           # Install yt-dlp and the POT provider plugin
           pip3 install --upgrade yt-dlp
@@ -58,14 +58,21 @@ jobs:
       - name: Wait for PO Token server
         run: |
           echo "⏳ Waiting for PO Token server to be ready..."
-          for i in {1..30}; do
+          for i in {1..60}; do
             if curl -s http://localhost:8080/ > /dev/null 2>&1; then
               echo "✅ PO Token server is ready!"
-              break
+              exit 0
             fi
-            echo "Waiting... ($i/30)"
+            echo "Waiting... ($i/60)"
             sleep 2
           done
+          echo "⚠️ Server may not be fully ready, continuing anyway..."
+
+      - name: Test PO Token server
+        run: |
+          echo "🧪 Testing PO Token server..."
+          curl -v http://localhost:8080/ || true
+          echo ""
 
       - name: AVASAM YouTube Downloader - https://avasam.ir
         run: |
@@ -75,6 +82,9 @@ jobs:
           echo ""
 
       - name: Download YouTube video
+        env:
+          # Configure the POT plugin to use the Docker service
+          BGUTIL_POT_HTTP_BASE_URL: "http://localhost:8080"
         run: |
           VIDEO_URL="${{ github.event.inputs.video_url }}"
           QUALITY="${{ github.event.inputs.quality }}"
@@ -84,6 +94,7 @@ jobs:
           echo "🏷️  AVASAM (https://avasam.ir) - YouTube Downloader"
           echo "📺 Video URL: $VIDEO_URL"
           echo "🎯 Quality: $QUALITY"
+          echo "🔗 PO Token Server: http://localhost:8080"
           echo ""
 
           mkdir -p videos tmp_downloads
@@ -112,15 +123,14 @@ jobs:
 
           echo "⬇️ Downloading with yt-dlp + automatic PO Token..."
 
-          # Download using the POT provider plugin
+          # Download using the POT provider plugin with explicit server URL
           yt-dlp \
             --format "$FORMAT_STRING" \
             --merge-output-format mp4 \
             --output "tmp_downloads/%(title)s.%(ext)s" \
             --no-playlist \
             --restrict-filenames \
-            --extractor-args "youtube:player_client=web" \
-            --use-extractors youtube \
+            --extractor-args "youtube:player_client=web,getpot_bgutil_baseurl=http://localhost:8080" \
             --retries 5 \
             --verbose \
             "$VIDEO_URL"
