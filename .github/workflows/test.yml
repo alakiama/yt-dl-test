@@ -4,39 +4,26 @@ on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'YouTube video URL (supports youtube.com and youtu.be links)'
+        description: 'YouTube video URL'
         required: true
         type: string
       quality:
         description: 'Video quality'
         required: false
-        default: 'best'
+        default: '720'
         type: choice
         options:
-          - best
-          - 1080p
-          - 720p
-          - 480p
-          - audio_only
-      format:
-        description: 'Output format'
-        required: false
-        default: 'mp4'
-        type: choice
-        options:
-          - mp4
-          - mkv
-          - webm
+          - '2160'
+          - '1080'
+          - '720'
+          - '480'
+          - '360'
+          - 'audio'
       split_threshold_mb:
         description: 'Split files larger than this MB (0 = never split, recommended: 90)'
         required: false
         default: 90
         type: number
-      cookies_base64:
-        description: 'Optional: Base64 encoded cookies.txt (for age-restricted/private videos)'
-        required: false
-        default: ''
-        type: string
 
 jobs:
   download-video:
@@ -52,18 +39,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zip curl
-
-          # Install Deno (JavaScript runtime required by yt-dlp)
-          curl -fsSL https://deno.land/install.sh | sh
-          echo "$HOME/.deno/bin" >> $GITHUB_PATH
-          export PATH="$HOME/.deno/bin:$PATH"
-          deno --version
-
-          # Install latest yt-dlp
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
-          yt-dlp --version
+          sudo apt-get install -y jq aria2 zip ffmpeg
 
       - name: AVASAM YouTube Downloader - https://avasam.ir
         run: |
@@ -71,81 +47,97 @@ jobs:
           echo "🌐 https://avasam.ir"
           echo ""
 
-      - name: Download YouTube video
-        env:
-          DENO_DIR: /tmp/deno_cache
+      - name: Get download link from Cobalt API
+        id: cobalt
         run: |
-          # Add deno to PATH
-          export PATH="$HOME/.deno/bin:$PATH"
-
           VIDEO_URL="${{ github.event.inputs.video_url }}"
           QUALITY="${{ github.event.inputs.quality }}"
-          FORMAT="${{ github.event.inputs.format }}"
-          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
-          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
-          COOKIES_BASE64="${{ github.event.inputs.cookies_base64 }}"
 
           echo "🏷️  AVASAM (https://avasam.ir) - YouTube Downloader"
           echo "📺 Video URL: $VIDEO_URL"
-          echo "🎯 Quality: $QUALITY"
-          echo "📁 Format: $FORMAT"
-          echo "✂️ Split threshold: $SPLIT_THRESHOLD_MB MB"
+          echo "🎯 Quality: ${QUALITY}p"
           echo ""
+
+          # Set video quality for Cobalt API
+          if [ "$QUALITY" = "audio" ]; then
+            DOWNLOAD_MODE="audio"
+            VIDEO_QUALITY="720"
+          else
+            DOWNLOAD_MODE="auto"
+            VIDEO_QUALITY="$QUALITY"
+          fi
+
+          echo "⬇️ Getting download link from Cobalt..."
+
+          # Call Cobalt API to get direct download link
+          RESPONSE=$(curl -s -X POST "https://api.cobalt.tools/" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"url\": \"$VIDEO_URL\",
+              \"videoQuality\": \"$VIDEO_QUALITY\",
+              \"downloadMode\": \"$DOWNLOAD_MODE\",
+              \"filenameStyle\": \"basic\"
+            }")
+
+          echo "API Response: $RESPONSE"
+
+          # Check for errors
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
+
+          if [ "$STATUS" = "error" ]; then
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.code // .text // "Unknown error"')
+            echo "❌ Error: $ERROR_MSG"
+            exit 1
+          fi
+
+          # Extract download URL
+          DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r '.url // empty')
+
+          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+            # Check if it's a picker response (multiple options)
+            PICKER_URL=$(echo "$RESPONSE" | jq -r '.picker[0].url // empty')
+            if [ -n "$PICKER_URL" ] && [ "$PICKER_URL" != "null" ]; then
+              DOWNLOAD_URL="$PICKER_URL"
+            else
+              echo "❌ Could not get download URL"
+              echo "Response: $RESPONSE"
+              exit 1
+            fi
+          fi
+
+          echo "✅ Got download link!"
+          echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+
+      - name: Download video file
+        run: |
+          DOWNLOAD_URL="${{ steps.cobalt.outputs.download_url }}"
+          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
+          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
+          QUALITY="${{ github.event.inputs.quality }}"
 
           mkdir -p videos tmp_downloads
 
-          # Handle cookies if provided
-          COOKIE_ARGS=""
-          if [ -n "$COOKIES_BASE64" ]; then
-            echo "$COOKIES_BASE64" | base64 -d > /tmp/cookies.txt
-            COOKIE_ARGS="--cookies /tmp/cookies.txt"
-            echo "🍪 Using provided cookies"
+          # Generate filename
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          if [ "$QUALITY" = "audio" ]; then
+            FILENAME="youtube_audio_${TIMESTAMP}.mp3"
+          else
+            FILENAME="youtube_${QUALITY}p_${TIMESTAMP}.mp4"
           fi
 
-          # Set quality format string for yt-dlp
-          case "$QUALITY" in
-            "best")
-              FORMAT_STRING="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
-              ;;
-            "1080p")
-              FORMAT_STRING="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
-              ;;
-            "720p")
-              FORMAT_STRING="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]"
-              ;;
-            "480p")
-              FORMAT_STRING="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]"
-              ;;
-            "audio_only")
-              FORMAT_STRING="bestaudio[ext=m4a]/bestaudio/best"
-              FORMAT="m4a"
-              ;;
-          esac
+          echo "⬇️ Downloading: $FILENAME"
 
-          echo "⬇️ Starting download with yt-dlp..."
-          echo "Format string: $FORMAT_STRING"
-
-          # Download video with yt-dlp
-          # Using various options to help with bot detection
-          yt-dlp \
-            --format "$FORMAT_STRING" \
-            --merge-output-format "$FORMAT" \
-            --output "tmp_downloads/%(title)s.%(ext)s" \
-            --no-playlist \
-            --restrict-filenames \
-            --no-overwrites \
-            --retries 5 \
-            --fragment-retries 5 \
-            --extractor-args "youtube:player_client=ios,web" \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" \
-            --sleep-interval 1 \
-            --max-sleep-interval 3 \
-            --no-check-certificates \
-            $COOKIE_ARGS \
-            "$VIDEO_URL"
+          # Download with aria2 for speed
+          aria2c \
+            --split=4 \
+            --max-connection-per-server=4 \
+            --min-split-size=20M \
+            --dir="tmp_downloads" \
+            --out="$FILENAME" \
+            "$DOWNLOAD_URL"
 
           echo "✅ Download completed!"
-          echo ""
 
           # Handle splitting large files
           for FILE in tmp_downloads/*; do
@@ -157,7 +149,6 @@ jobs:
 
             if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
               echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts"
-              # Create a zip split into parts
               zip -0 -s "${SPLIT_THRESHOLD_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
               PART_COUNT=$(ls videos/${BASENAME}.z* 2>/dev/null | wc -l)
               echo "✅ Split into $PART_COUNT parts"
@@ -168,8 +159,6 @@ jobs:
           done
 
           rm -rf tmp_downloads
-          # Clean up cookies
-          rm -f /tmp/cookies.txt
           echo ""
           echo "📦 Files ready in videos folder:"
           ls -lh videos/
@@ -182,7 +171,6 @@ jobs:
 
           echo "🏷️  AVASAM (https://avasam.ir) - Committing video files"
 
-          # Collect all new/modified files under videos/
           mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard videos/)
 
           TOTAL=${#ALL_FILES[@]}
@@ -205,7 +193,6 @@ jobs:
             git add "${BATCH[@]}"
             git commit -m "[AVASAM] 🎬 YouTube video download — batch $BATCH_NUM [skip ci]"
 
-            # Pull with rebase before each push to avoid conflicts
             git pull --rebase origin "$BRANCH"
             git push origin HEAD:"$BRANCH"
 
