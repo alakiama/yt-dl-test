@@ -1,85 +1,209 @@
-name: Test Free Proxies for YouTube Direct URL
+name: 🎬 YouTube Downloader (via Cobalt + WARP)
 
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'YouTube Video URL'
+      youtube_url:
+        description: 'YouTube video URL'
         required: true
         type: string
+      quality:
+        description: 'Video quality'
+        required: false
+        default: '1080'
+        type: choice
+        options:
+          - max
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - 360
+      download_mode:
+        description: 'Download mode'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - audio
+          - mute
+      split_threshold_mb:
+        description: 'Split files larger than this MB (0 = never split)'
+        required: false
+        default: 90
+        type: number
 
 jobs:
-  test:
+  download-youtube:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    services:
+      # Cloudflare WARP container for IP bypass
+      warp:
+        image: ghcr.io/monius/docker-warp-socks:latest
+        options: --cap-add NET_ADMIN --cap-add SYS_MODULE --sysctl net.ipv4.conf.all.src_valid_mark=1 --sysctl net.ipv4.ip_forward=1
+        ports:
+          - 1080:1080
+
     steps:
-      - run: pip install yt-dlp
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fetch free proxies from SandVPN (Robust)
+      - name: Wait for WARP to be ready
         run: |
-          # Make the request and capture the HTTP status code and output
-          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}\n" "https://api.sandvpn.com/fetch-free-proxys")
-          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
-          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+          echo "⏳ Waiting for Cloudflare WARP to initialize..."
+          sleep 15
+          # Test WARP connection
+          curl --socks5 127.0.0.1:1080 -s https://cloudflare.com/cdn-cgi/trace | grep -q "warp=on" && echo "✅ WARP is active!" || echo "⚠️ WARP check inconclusive, proceeding anyway..."
 
-          echo "API Response Status: $HTTP_STATUS"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 zip curl jq
 
-          # If the request failed or returned an error (e.g., 4xx or 5xx), exit with an error
-          if [[ $HTTP_STATUS -ge 400 ]]; then
-            echo "API request failed with status $HTTP_STATUS"
-            echo "Response body (may be HTML):"
-            echo "$HTTP_BODY"
-            exit 1
-          fi
-
-          # Check if the response **could be** JSON (starts with '{' or '[' after trimming whitespace)
-          TRIMMED_BODY=$(echo "$HTTP_BODY" | sed -e 's/^[ \t]*//')
-          if [[ $TRIMMED_BODY =~ ^(\{|\[) ]]; then
-            echo "API seems to have returned JSON. Parsing with jq..."
-            # If valid JSON, try to parse and filter for free proxies
-            echo "$HTTP_BODY" | jq -r '.[] | select(.paid == false) | "\(.host):\(.port)"' > proxies.txt
-            # Check if we actually found any proxies
-            if [ ! -s proxies.txt ]; then
-              echo "No free proxies found in JSON response."
-              exit 1
+      - name: Get video info from Cobalt API
+        id: cobalt
+        run: |
+          YOUTUBE_URL="${{ github.event.inputs.youtube_url }}"
+          QUALITY="${{ github.event.inputs.quality }}"
+          DOWNLOAD_MODE="${{ github.event.inputs.download_mode }}"
+          
+          echo "🏷️ AVASAM YouTube Downloader"
+          echo "🌐 https://avasam.ir"
+          echo ""
+          echo "📹 Fetching: $YOUTUBE_URL"
+          
+          # List of public Cobalt API instances to try
+          COBALT_APIS=(
+            "https://api.cobalt.tools"
+            "https://cobalt-api.kwiatekmiki.com"
+            "https://cobalt-api.hyper.lol"
+          )
+          
+          DIRECT_URL=""
+          FILENAME=""
+          
+          for API in "${COBALT_APIS[@]}"; do
+            echo "🔄 Trying Cobalt API: $API"
+            
+            RESPONSE=$(curl --socks5 127.0.0.1:1080 -s -X POST "$API/" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"url\": \"$YOUTUBE_URL\",
+                \"videoQuality\": \"$QUALITY\",
+                \"downloadMode\": \"$DOWNLOAD_MODE\",
+                \"filenameStyle\": \"basic\"
+              }" 2>/dev/null || echo "")
+            
+            echo "Response: $RESPONSE"
+            
+            if [ -n "$RESPONSE" ]; then
+              STATUS=$(echo "$RESPONSE" | jq -r '.status // "error"')
+              
+              if [ "$STATUS" = "tunnel" ] || [ "$STATUS" = "redirect" ]; then
+                DIRECT_URL=$(echo "$RESPONSE" | jq -r '.url // empty')
+                FILENAME=$(echo "$RESPONSE" | jq -r '.filename // "video.mp4"')
+                
+                if [ -n "$DIRECT_URL" ] && [ "$DIRECT_URL" != "null" ]; then
+                  echo "✅ Got direct URL from $API"
+                  break
+                fi
+              elif [ "$STATUS" = "picker" ]; then
+                # Handle picker response (multiple formats)
+                DIRECT_URL=$(echo "$RESPONSE" | jq -r '.picker[0].url // empty')
+                FILENAME=$(echo "$RESPONSE" | jq -r '.picker[0].filename // "video.mp4"')
+                if [ -n "$DIRECT_URL" ] && [ "$DIRECT_URL" != "null" ]; then
+                  echo "✅ Got direct URL from picker at $API"
+                  break
+                fi
+              else
+                ERROR=$(echo "$RESPONSE" | jq -r '.error.code // .error // "unknown"')
+                echo "⚠️ API returned error: $ERROR"
+              fi
             fi
-            echo "Found $(wc -l < proxies.txt) free proxies from SandVPN."
-            cat proxies.txt
-          else
-            echo "API did not return JSON. It returned:"
-            echo "$HTTP_BODY" | head -c 500
-            echo ""
-            echo "Proceeding to fallback method..."
+          done
+          
+          if [ -z "$DIRECT_URL" ] || [ "$DIRECT_URL" = "null" ]; then
+            echo "❌ Failed to get download URL from all Cobalt APIs"
+            echo "This usually means:"
+            echo "  1. YouTube is blocking this request"
+            echo "  2. The Cobalt APIs require authentication now"
+            echo "  3. The video is geo-restricted or private"
             exit 1
           fi
+          
+          echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
 
-      - name: Fallback - Use Free Proxy List from GitHub (if SandVPN fails)
-        if: failure()
+      - name: Download video
         run: |
-          echo "SandVPN API failed. Using fallback proxy list from GitHub..."
-          # Use a known, updated list of free HTTP proxies
-          curl -s "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt" | head -10 > proxies.txt
-          echo "Using $(wc -l < proxies.txt) proxies from GitHub fallback list:"
-          cat proxies.txt
-
-      - name: Test each proxy for YouTube direct URL
-        run: |
-          URL="${{ github.event.inputs.url }}"
-          SUCCESS=""
-          while read proxy; do
-            [ -z "$proxy" ] && continue
-            echo "Testing proxy: $proxy"
-            result=$(timeout 20 yt-dlp --proxy "http://$proxy" -g "$URL" 2>/dev/null | head -1)
-            if [ -n "$result" ] && echo "$result" | grep -qE '^https?://'; then
-              echo "✅ SUCCESS with proxy $proxy"
-              echo "$result" > direct_url.txt
-              SUCCESS="$result"
-              break
+          DIRECT_URL="${{ steps.cobalt.outputs.direct_url }}"
+          FILENAME="${{ steps.cobalt.outputs.filename }}"
+          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
+          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
+          
+          mkdir -p downloads tmp_downloads videos
+          
+          echo "⬇️ Downloading: $FILENAME"
+          
+          # Download through WARP proxy
+          aria2c \
+            --all-proxy="socks5://127.0.0.1:1080" \
+            --split=4 \
+            --max-connection-per-server=4 \
+            --min-split-size=20M \
+            --dir="tmp_downloads" \
+            --out="$FILENAME" \
+            "$DIRECT_URL"
+          
+          # Handle splitting large files
+          for FILE in tmp_downloads/*; do
+            [ -f "$FILE" ] || continue
+            SIZE=$(stat -c%s "$FILE")
+            BASENAME=$(basename "$FILE")
+            
+            if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
+              echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts"
+              zip -0 -s "${SPLIT_THRESHOLD_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
+              echo "✅ Parts created: $(ls videos/${BASENAME}.z* 2>/dev/null | wc -l)"
+            else
+              cp "$FILE" "videos/$BASENAME"
             fi
-          done < proxies.txt
-          if [ -z "$SUCCESS" ]; then
-            echo "❌ No working proxy found"
-            exit 1
-          fi
+          done
+          rm -rf tmp_downloads
 
-      - name: Show direct URL
-        run: cat direct_url.txt
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard videos/)
+          TOTAL=${#ALL_FILES[@]}
+          
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          
+          BATCH_SIZE=5
+          BATCH_NUM=0
+          BRANCH="${GITHUB_REF_NAME}"
+          
+          for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
+            BATCH_NUM=$(( BATCH_NUM + 1 ))
+            BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
+            
+            git add "${BATCH[@]}"
+            git commit -m "[AVASAM] YouTube download — batch $BATCH_NUM [skip ci]"
+            git pull --rebase origin "$BRANCH"
+            git push origin HEAD:"$BRANCH"
+          done
+          
+          echo "🎉 Downloaded and pushed successfully — AVASAM (https://avasam.ir)"
