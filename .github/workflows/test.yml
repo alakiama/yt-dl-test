@@ -1,4 +1,5 @@
-name: Download YouTube Video (Free API)
+name: Download YouTube Video via Cobalt API
+
 on:
   workflow_dispatch:
     inputs:
@@ -6,53 +7,34 @@ on:
         description: 'YouTube Video URL'
         required: true
         type: string
+
 permissions:
   contents: write
+
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Create Downloads Folder
-        run: mkdir -p downloads
-      - name: Get Download Link and Download Video
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt install -y jq
+      - name: Get direct link and download
         run: |
+          mkdir -p downloads
           cd downloads
-          # Send the request, save the JSON response, and extract the 'url' field
-          curl -s -X POST https://api.cobalt.tools/api/json \
+          RESPONSE=$(curl -s -X POST https://api.cobalt.tools/api/json \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
-            -d "{\"url\": \"${{ github.event.inputs.url }}\", \"videoQuality\": \"1080\", \"filenamePattern\": \"basic\"}" \
-            > cobalt_response.json
-
-          # Extract the direct download URL and save it to a file
-          DOWNLOAD_URL=$(jq -r '.url' cobalt_response.json)
-
-          if [ "$DOWNLOAD_URL" == "null" ] || [ -z "$DOWNLOAD_URL" ]; then
-            echo "Error: Could not get download link"
-            cat cobalt_response.json
+            -d "{\"url\":\"${{ github.event.inputs.url }}\"}")
+          DIRECT_URL=$(echo "$RESPONSE" | jq -r '.url')
+          if [ "$DIRECT_URL" = "null" ]; then
+            echo "Error: $RESPONSE"
             exit 1
           fi
-
-          # Download the video from the provided direct URL
-          wget --content-disposition "$DOWNLOAD_URL"
-      - name: Split Large Videos into 90MB Zip Parts
+          wget --content-disposition "$DIRECT_URL"
+      - name: Commit and push
         run: |
-          cd downloads
-          for file in *; do
-            if [ -f "$file" ] && \
-               ! [[ "$file" == *.zip || "$file" == *.z?? ]] && \
-               [ $(stat -c%s "$file") -gt $((90 * 1024 * 1024)) ]; then
-              echo "Splitting $file into 90MB parts..."
-              zip -s 90m "${file}.zip" "$file"
-              rm "$file"
-            fi
-          done
-      - name: Commit and Push to Repository
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions"
           git add downloads/
-          git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
+          git commit -m "Add video" || true
           git push
