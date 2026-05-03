@@ -1,10 +1,10 @@
-name: Download YouTube Video (Automated Cookies)
+name: Download YouTube Video
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube Video URL'
+        description: 'YouTube URL'
         required: true
         type: string
 
@@ -17,61 +17,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
+      - name: Install yt-dlp
         run: |
-          pip install yt-dlp "browser-cookie3>=0.19.1" selenium
-          # Install Chrome for Selenium
           sudo apt update
-          sudo apt install -y chromium-browser
+          sudo apt install -y ffmpeg
+          pip3 install --upgrade yt-dlp
 
-      - name: Generate YouTube Cookies
+      - name: Create videos folder
+        run: mkdir -p videos
+
+      - name: Write cookies from secret
+        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
+      - name: Download video
         run: |
-          python <<EOF
-          import browser_cookie3
-          from selenium import webdriver
-          from selenium.webdriver.chrome.options import Options
-          import time, os
-
-          # Set up headless Chrome
-          options = Options()
-          options.add_argument('--headless')
-          options.add_argument('--no-sandbox')
-          options.add_argument('--disable-dev-shm-usage')
-          driver = webdriver.Chrome(options=options)
-          
-          # Go to YouTube and log in
-          driver.get('https://accounts.google.com/signin')
-          # Add detailed login steps and wait for the cookie to be set 
-          # — this is a simplified version
-          driver.get('https://youtube.com')
-          time.sleep(5) # Wait for page to load fully
-          
-          # You'll need full login automation here
-          print("Cookies should be set")
-          driver.quit()
-          
-          # Export cookies using browser_cookie3
-          import browser_cookie3
-          cj = browser_cookie3.chrome()
-          
-          with open('cookies.txt', 'w') as f:
-              for cookie in cj:
-                  if 'youtube.com' in cookie.domain:
-                      f.write(f"{cookie.domain}\tTRUE\t{cookie.path}\t{'TRUE' if cookie.secure else 'FALSE'}\t{repr(cookie.expires if cookie.expires else 0)}\t{cookie.name}\t{cookie.value}\n")
-          EOF
-
-      - name: Download and Commit Video
-        run: |
-          mkdir -p videos
           cd videos
           yt-dlp --cookies ../cookies.txt -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
+
+      - name: Commit and push
+        run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add .
-          git diff --staged --quiet || git commit -m "Add YouTube video"
+          git add videos/
+          git commit -m "Add video" || echo "No changes"
           git push
