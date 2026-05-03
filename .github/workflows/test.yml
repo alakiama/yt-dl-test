@@ -1,45 +1,18 @@
-name: Download YouTube Video
-
-on:
-  workflow_dispatch:
-    inputs:
-      url:
-        description: 'YouTube URL'
-        required: true
-        type: string
-
-permissions:
-  contents: write
-
+name: Download with Lux
+on: workflow_dispatch
+inputs: { url: { required: true, type: string } }
+permissions: { contents: write }
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup yt-dlp, FFmpeg, and EJS Node
-        uses: AnimMouse/setup-yt-dlp@v3
-        with:
-          ffmpeg: true
-          ejs-node: true
-          aria2: true
-
-      - name: Create videos folder
-        run: mkdir -p videos
-
-      - name: Download YouTube video
-        run: |
-          cd videos
-          yt-dlp \
-            --extractor-args "youtube:player-client=default" \
-            -o "%(title)s.%(ext)s" \
-            "${{ github.event.inputs.url }}"
-
-      - name: Commit and push downloaded video
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add videos/
-          git commit -m "Add YouTube video from ${{ github.event.inputs.url }}" || echo "No changes to commit"
+      - uses: actions/checkout@v4
+      - run: |
+          wget https://github.com/iaw002/lux/releases/latest/download/lux_linux_amd64.tar.gz
+          tar -xzf lux_linux_amd64.tar.gz
+          sudo mv lux /usr/local/bin/
+      - run: mkdir -p videos && lux -o ./videos "${{ github.event.inputs.url }}"
+      - run: |
+          git config user.name github-actions
+          git add videos/ && git commit -m "video" || true
           git push
