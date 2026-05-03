@@ -1,4 +1,4 @@
-name: Download YouTube Video with yt-dlp-proxy (Patched)
+name: Test Free Proxies for YouTube Direct URL
 
 on:
   workflow_dispatch:
@@ -8,56 +8,37 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
-
 jobs:
-  download:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - run: pip install yt-dlp
 
-      - name: Install dependencies
+      - name: Fetch free proxies from SandVPN
         run: |
-          sudo apt update
-          sudo apt install -y python3-pip ffmpeg zip make
+          curl -s "https://api.sandvpn.com/fetch-free-proxys" | jq -r '.[] | select(.paid == false) | "\(.host):\(.port)"' > proxies.txt
+          echo "Found $(wc -l < proxies.txt) free proxies"
+          cat proxies.txt
 
-      - name: Clone and patch yt-dlp-proxy
+      - name: Test each proxy for YouTube direct URL
         run: |
-          git clone https://github.com/Petrprogs/yt-dlp-proxy.git
-          cd yt-dlp-proxy
-          # Change the hardcoded path from /usr/local/proxy.json to ./proxy.json
-          sed -i 's|/usr/local/proxy.json|./proxy.json|g' main.py
-          make build
-          sudo make install
-          cd ..
-          rm -rf yt-dlp-proxy
-
-      - name: Update proxy list (writes to current directory)
-        run: |
-          # Create empty proxy.json in current dir
-          touch proxy.json
-          yt-dlp-proxy update --max-workers 10
-
-      - name: Download video
-        run: |
-          mkdir -p downloads
-          cd downloads
-          yt-dlp-proxy -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
-
-      - name: Split into 90MB zip parts
-        run: |
-          cd downloads
-          for f in *; do
-            if [ -f "$f" ] && [ $(stat -c%s "$f") -gt $((90*1024*1024)) ]; then
-              zip -s 90m "${f%.*}.zip" "$f" && rm "$f"
+          URL="${{ github.event.inputs.url }}"
+          SUCCESS=""
+          while read proxy; do
+            [ -z "$proxy" ] && continue
+            echo "Testing proxy: $proxy"
+            result=$(timeout 20 yt-dlp --proxy "http://$proxy" -g "$URL" 2>/dev/null | head -1)
+            if [ -n "$result" ] && echo "$result" | grep -qE '^https?://'; then
+              echo "✅ SUCCESS with proxy $proxy"
+              echo "$result" > direct_url.txt
+              SUCCESS="$result"
+              break
             fi
-          done
+          done < proxies.txt
+          if [ -z "$SUCCESS" ]; then
+            echo "❌ No working proxy found"
+            exit 1
+          fi
 
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add downloads/
-          git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
-          git push
+      - name: Show direct URL
+        run: cat direct_url.txt
