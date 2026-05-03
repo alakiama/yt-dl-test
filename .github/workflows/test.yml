@@ -1,4 +1,4 @@
-name: Try Web Downloader
+name: Download YouTube Video
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
       url:
         description: 'YouTube URL'
         required: true
-        type: string
 
 permissions:
   contents: write
@@ -16,23 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Try to download via web service
+      - run: sudo apt update && sudo apt install -y ffmpeg && pip3 install yt-dlp
+      - run: mkdir -p videos
+      - name: Use cookie string from secret
         run: |
-          mkdir -p videos
-          cd videos
-          
-          # Example: Try to call a hypothetical API (replace with actual endpoint)
-          # This is a placeholder – real sites require browser emulation
-          curl -s "https://freightpass.ca/api/download?url=${{ github.event.inputs.url }}" -o video.mp4
-          
-          # If the above doesn't work, try using yt-dlp with a custom user-agent
-          # but that's back to the original problem.
-
-      - name: Commit if file exists
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add videos/
-          git commit -m "Try download" || echo "No file downloaded"
-          git push
+          echo "# Netscape HTTP Cookie File" > cookies.txt
+          echo "${{ secrets.YOUTUBE_COOKIE_STRING }}" | tr ';' '\n' | while read c; do
+            c=$(echo "$c" | sed 's/^[ \t]*//')
+            [ -n "$c" ] && echo ".youtube.com TRUE / FALSE 0 $(echo $c | cut -d= -f1) $(echo $c | cut -d= -f2-)" >> cookies.txt
+          done
+      - run: cd videos && yt-dlp --cookies ../cookies.txt "${{ github.event.inputs.url }}"
+      - run: git config user.name github-actions && git add videos/ && git commit -m "video" || true && git push
