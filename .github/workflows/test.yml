@@ -32,6 +32,11 @@ on:
         required: false
         default: 90
         type: number
+      cookies_base64:
+        description: 'Optional: Base64 encoded cookies.txt (for age-restricted/private videos)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   download-video:
@@ -47,7 +52,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zip
+          sudo apt-get install -y ffmpeg zip curl
+
+          # Install Deno (JavaScript runtime required by yt-dlp)
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.deno/bin:$PATH"
+          deno --version
+
           # Install latest yt-dlp
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
@@ -60,12 +72,18 @@ jobs:
           echo ""
 
       - name: Download YouTube video
+        env:
+          DENO_DIR: /tmp/deno_cache
         run: |
+          # Add deno to PATH
+          export PATH="$HOME/.deno/bin:$PATH"
+
           VIDEO_URL="${{ github.event.inputs.video_url }}"
           QUALITY="${{ github.event.inputs.quality }}"
           FORMAT="${{ github.event.inputs.format }}"
           SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
           SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
+          COOKIES_BASE64="${{ github.event.inputs.cookies_base64 }}"
 
           echo "🏷️  AVASAM (https://avasam.ir) - YouTube Downloader"
           echo "📺 Video URL: $VIDEO_URL"
@@ -75,6 +93,14 @@ jobs:
           echo ""
 
           mkdir -p videos tmp_downloads
+
+          # Handle cookies if provided
+          COOKIE_ARGS=""
+          if [ -n "$COOKIES_BASE64" ]; then
+            echo "$COOKIES_BASE64" | base64 -d > /tmp/cookies.txt
+            COOKIE_ARGS="--cookies /tmp/cookies.txt"
+            echo "🍪 Using provided cookies"
+          fi
 
           # Set quality format string for yt-dlp
           case "$QUALITY" in
@@ -100,6 +126,7 @@ jobs:
           echo "Format string: $FORMAT_STRING"
 
           # Download video with yt-dlp
+          # Using various options to help with bot detection
           yt-dlp \
             --format "$FORMAT_STRING" \
             --merge-output-format "$FORMAT" \
@@ -107,8 +134,14 @@ jobs:
             --no-playlist \
             --restrict-filenames \
             --no-overwrites \
-            --retries 3 \
-            --fragment-retries 3 \
+            --retries 5 \
+            --fragment-retries 5 \
+            --extractor-args "youtube:player_client=ios,web" \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" \
+            --sleep-interval 1 \
+            --max-sleep-interval 3 \
+            --no-check-certificates \
+            $COOKIE_ARGS \
             "$VIDEO_URL"
 
           echo "✅ Download completed!"
@@ -135,6 +168,8 @@ jobs:
           done
 
           rm -rf tmp_downloads
+          # Clean up cookies
+          rm -f /tmp/cookies.txt
           echo ""
           echo "📦 Files ready in videos folder:"
           ls -lh videos/
