@@ -1,4 +1,4 @@
-name: Download YouTube Video
+name: Automated YouTube Download
 
 on:
   workflow_dispatch:
@@ -15,37 +15,31 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install latest yt-dlp and ffmpeg
+      - name: Install yt-dlp and PO Token Provider Plugin
         run: |
           sudo apt update
-          sudo apt install -y python3-pip ffmpeg
-          pip3 install --upgrade yt-dlp
+          sudo apt install -y ffmpeg
+          pip install --upgrade yt-dlp
+          pip install bgutil-ytdlp-pot-provider
 
       - name: Create videos folder
         run: mkdir -p videos
 
-      - name: Write cookies file from secret
-        run: |
-          echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
-          # Verify first line (optional, for debugging)
-          head -1 cookies.txt
-
-      - name: Download YouTube video
+      - name: Download video using PO Token (No Cookies Needed)
         run: |
           cd videos
           yt-dlp \
-            --cookies ../cookies.txt \
             --extractor-args "youtube:player-client=android" \
             -o "%(title)s.%(ext)s" \
+            --verbose \
             "${{ github.event.inputs.url }}"
 
-      - name: Commit and push downloaded video
+      - name: Commit and push
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add videos/
-          git commit -m "Add YouTube video from ${{ github.event.inputs.url }}" || echo "No changes to commit"
+          git commit -m "Add YouTube video via automated PO Token" || echo "No changes"
           git push
