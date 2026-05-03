@@ -1,1 +1,0 @@
-WARNING: -f best selects the best pre-merged format which is often not the best option.
