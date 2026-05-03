@@ -14,10 +14,51 @@ jobs:
     steps:
       - run: pip install yt-dlp
 
-      - name: Fetch free proxies from SandVPN
+      - name: Fetch free proxies from SandVPN (Robust)
         run: |
-          curl -s "https://api.sandvpn.com/fetch-free-proxys" | jq -r '.[] | select(.paid == false) | "\(.host):\(.port)"' > proxies.txt
-          echo "Found $(wc -l < proxies.txt) free proxies"
+          # Make the request and capture the HTTP status code and output
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}\n" "https://api.sandvpn.com/fetch-free-proxys")
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+
+          echo "API Response Status: $HTTP_STATUS"
+
+          # If the request failed or returned an error (e.g., 4xx or 5xx), exit with an error
+          if [[ $HTTP_STATUS -ge 400 ]]; then
+            echo "API request failed with status $HTTP_STATUS"
+            echo "Response body (may be HTML):"
+            echo "$HTTP_BODY"
+            exit 1
+          fi
+
+          # Check if the response **could be** JSON (starts with '{' or '[' after trimming whitespace)
+          TRIMMED_BODY=$(echo "$HTTP_BODY" | sed -e 's/^[ \t]*//')
+          if [[ $TRIMMED_BODY =~ ^(\{|\[) ]]; then
+            echo "API seems to have returned JSON. Parsing with jq..."
+            # If valid JSON, try to parse and filter for free proxies
+            echo "$HTTP_BODY" | jq -r '.[] | select(.paid == false) | "\(.host):\(.port)"' > proxies.txt
+            # Check if we actually found any proxies
+            if [ ! -s proxies.txt ]; then
+              echo "No free proxies found in JSON response."
+              exit 1
+            fi
+            echo "Found $(wc -l < proxies.txt) free proxies from SandVPN."
+            cat proxies.txt
+          else
+            echo "API did not return JSON. It returned:"
+            echo "$HTTP_BODY" | head -c 500
+            echo ""
+            echo "Proceeding to fallback method..."
+            exit 1
+          fi
+
+      - name: Fallback - Use Free Proxy List from GitHub (if SandVPN fails)
+        if: failure()
+        run: |
+          echo "SandVPN API failed. Using fallback proxy list from GitHub..."
+          # Use a known, updated list of free HTTP proxies
+          curl -s "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt" | head -10 > proxies.txt
+          echo "Using $(wc -l < proxies.txt) proxies from GitHub fallback list:"
           cat proxies.txt
 
       - name: Test each proxy for YouTube direct URL
