@@ -20,7 +20,7 @@ jobs:
 
       - name: Install Lux
         run: |
-          wget https://github.com/iaw002/lux/releases/latest/download/lux_linux_amd64.tar.gz
+          wget https://github.com/iawia002/lux/releases/latest/download/lux_linux_amd64.tar.gz
           tar -xzf lux_linux_amd64.tar.gz
           sudo mv lux /usr/local/bin/
           rm lux_linux_amd64.tar.gz
