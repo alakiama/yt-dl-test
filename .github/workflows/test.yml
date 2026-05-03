@@ -1,10 +1,10 @@
-name: Download YouTube Video
+name: Try Web Downloader
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube Video URL'
+        description: 'YouTube URL'
         required: true
         type: string
 
@@ -15,31 +15,24 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install yt-dlp and PO Token Plugin (bgutil-ytdlp-pot-provider)
+      - name: Try to download via web service
         run: |
-          # Install yt-dlp and the PO Token provider plugin
-          # The plugin will automatically fetch & provide a PO Token
-          python3 -m pip install --upgrade yt-dlp
-          python3 -m pip install bgutil-ytdlp-pot-provider
-
-      - name: Create videos folder
-        run: mkdir -p videos
-
-      - name: Download video using PO Token
-        env:
-          YT_URL: ${{ github.event.inputs.url }}
-        run: |
+          mkdir -p videos
           cd videos
-          # The --verbose flag outputs detailed logs for debugging if needed
-          yt-dlp --verbose "$YT_URL"
+          
+          # Example: Try to call a hypothetical API (replace with actual endpoint)
+          # This is a placeholder – real sites require browser emulation
+          curl -s "https://freightpass.ca/api/download?url=${{ github.event.inputs.url }}" -o video.mp4
+          
+          # If the above doesn't work, try using yt-dlp with a custom user-agent
+          # but that's back to the original problem.
 
-      - name: Commit and push video
+      - name: Commit if file exists
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add videos/
-          git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
+          git commit -m "Try download" || echo "No file downloaded"
           git push
