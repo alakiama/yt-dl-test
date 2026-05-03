@@ -1,4 +1,4 @@
-name: Download YouTube Video
+name: Download YouTube Video (Robust)
 
 on:
   workflow_dispatch:
@@ -15,28 +15,78 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup yt-dlp (with EJS Node and FFmpeg)
+      # ---------- DIAGNOSTIC: verify the secret ----------
+      - name: Decode and validate YOUTUBE_COOKIES secret
+        run: |
+          if [ -z "${{ secrets.YOUTUBE_COOKIES }}" ]; then
+            echo "❌ Secret YOUTUBE_COOKIES is empty or not set."
+            exit 1
+          fi
+          echo "${{ secrets.YOUTUBE_COOKIES }}" | base64 -d > test_cookies.txt
+          head -1 test_cookies.txt
+          if ! grep -q "^# Netscape HTTP Cookie File" test_cookies.txt; then
+            echo "❌ Decoded cookies do NOT start with '# Netspace HTTP Cookie File'"
+            echo "👉 Please re‑export your cookies from Firefox using the 'Export Cookies' extension."
+            exit 1
+          fi
+          echo "✅ Cookies file looks valid (Netscape format)."
+
+      # ---------- Install yt‑dlp with EJS Node & FFmpeg ----------
+      - name: Setup yt-dlp
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           ejs-node: true
           ffmpeg: true
 
+      # ---------- Configure cookies ----------
       - name: Setup yt-dlp YouTube cookies
         uses: AnimMouse/setup-yt-dlp/cookies@v3
         with:
           cookies: ${{ secrets.YOUTUBE_COOKIES }}
 
-      - name: Create downloads folder
-        run: mkdir -p downloads
+      # ---------- Create output folder ----------
+      - run: mkdir -p downloads
 
-      - name: Download video
+      # ---------- Try download with cookies ----------
+      - name: Download with cookies
+        id: download_cookies
+        continue-on-error: true
         run: |
           cd downloads
           yt-dlp -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
+          echo "success=true" >> $GITHUB_OUTPUT
 
+      # ---------- Fallback: use PO token (impersonation) if cookies fail ----------
+      - name: Fallback – download with impersonation
+        if: steps.download_cookies.outputs.success != 'true'
+        run: |
+          # Install PO token provider plugin
+          pip install bgutil-ytdlp-pot-provider
+          docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
+          sleep 5
+          cd downloads
+          yt-dlp \
+            --extractor-args "youtube:pot-provider=bgutil:http://localhost:4416" \
+            --extractor-args "youtube:player_client=android" \
+            -f "bestvideo+bestaudio/best" \
+            -o "%(title)s.%(ext)s" \
+            "${{ github.event.inputs.url }}"
+
+      # ---------- Split into 90 MB zip parts ----------
+      - name: Split large files into 90 MB zip parts
+        run: |
+          cd downloads
+          for f in *; do
+            if [ -f "$f" ] && [ $(stat -c%s "$f") -gt $((90 * 1024 * 1024)) ]; then
+              echo "✂️ Splitting $f"
+              zip -s 90m "${f%.*}.zip" "$f"
+              rm "$f"
+            fi
+          done
+
+      # ---------- Commit and push ----------
       - name: Commit and push
         run: |
           git config user.name "github-actions"
