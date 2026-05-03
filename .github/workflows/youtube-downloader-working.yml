@@ -1,4 +1,4 @@
-name: 🎬 YouTube Downloader (WARP Bypass)
+name: 🎬 Youtube Downloader 
 
 on:
   workflow_dispatch:
