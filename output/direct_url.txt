@@ -1,0 +1,5 @@
+WARNING: "-f best" selects the best pre-merged format which is often not the best option.
+         To let yt-dlp download and merge the best available formats, simply do not pass any format selection.
+         If you know what you are doing and want only the best pre-merged format, use "-f b" instead to suppress this warning
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] cXbYjaEsQWg: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
