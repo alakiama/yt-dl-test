@@ -13,6 +13,7 @@ on:
         default: '720'
         type: choice
         options:
+          - 'best'
           - '1080'
           - '720'
           - '480'
@@ -29,6 +30,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
+    services:
+      # PO Token generator service
+      pot-server:
+        image: brainicism/bgutil-ytdlp-pot-provider:latest
+        ports:
+          - 8080:8080
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,15 +47,34 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq aria2 zip ffmpeg
+          sudo apt-get install -y ffmpeg zip python3-pip
+
+          # Install yt-dlp and the POT provider plugin
+          pip3 install --upgrade yt-dlp
+          pip3 install bgutil-ytdlp-pot-provider
+
+          yt-dlp --version
+
+      - name: Wait for PO Token server
+        run: |
+          echo "⏳ Waiting for PO Token server to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/ > /dev/null 2>&1; then
+              echo "✅ PO Token server is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
 
       - name: AVASAM YouTube Downloader - https://avasam.ir
         run: |
           echo "🏷️  AVASAM - YouTube Video Download Solution"
           echo "🌐 https://avasam.ir"
+          echo "🔐 Using automatic PO Token generation"
           echo ""
 
-      - name: Download YouTube video via Piped API
+      - name: Download YouTube video
         run: |
           VIDEO_URL="${{ github.event.inputs.video_url }}"
           QUALITY="${{ github.event.inputs.quality }}"
@@ -60,115 +88,42 @@ jobs:
 
           mkdir -p videos tmp_downloads
 
-          # Extract video ID from URL
-          VIDEO_ID=$(echo "$VIDEO_URL" | grep -oP '(?:v=|youtu\.be/|/embed/|/v/)?\K[a-zA-Z0-9_-]{11}' | head -1)
+          # Set format based on quality
+          case "$QUALITY" in
+            "best")
+              FORMAT_STRING="bv*+ba/b"
+              ;;
+            "1080")
+              FORMAT_STRING="bv*[height<=1080]+ba/b[height<=1080]"
+              ;;
+            "720")
+              FORMAT_STRING="bv*[height<=720]+ba/b[height<=720]"
+              ;;
+            "480")
+              FORMAT_STRING="bv*[height<=480]+ba/b[height<=480]"
+              ;;
+            "360")
+              FORMAT_STRING="bv*[height<=360]+ba/b[height<=360]"
+              ;;
+            "audio")
+              FORMAT_STRING="ba/b"
+              ;;
+          esac
 
-          if [ -z "$VIDEO_ID" ]; then
-            echo "❌ Could not extract video ID from URL"
-            exit 1
-          fi
+          echo "⬇️ Downloading with yt-dlp + automatic PO Token..."
 
-          echo "🔑 Video ID: $VIDEO_ID"
-
-          # List of Piped API instances to try
-          PIPED_INSTANCES=(
-            "pipedapi.kavin.rocks"
-            "pipedapi.adminforge.de"
-            "api.piped.privacydev.net"
-            "pipedapi.in.projectsegfau.lt"
-            "pipedapi.leptons.xyz"
-          )
-
-          DOWNLOAD_URL=""
-          AUDIO_URL=""
-          VIDEO_TITLE=""
-
-          # Try each Piped instance
-          for INSTANCE in "${PIPED_INSTANCES[@]}"; do
-            echo "📡 Trying Piped instance: $INSTANCE"
-
-            RESPONSE=$(curl -s --max-time 30 "https://${INSTANCE}/streams/${VIDEO_ID}" 2>/dev/null)
-
-            # Check if response is valid
-            if echo "$RESPONSE" | jq -e '.videoStreams' > /dev/null 2>&1; then
-              VIDEO_TITLE=$(echo "$RESPONSE" | jq -r '.title // "video"' | tr -cd '[:alnum:] _-' | tr ' ' '_')
-
-              if [ "$QUALITY" = "audio" ]; then
-                # Get best audio stream
-                DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r '.audioStreams | sort_by(.bitrate) | reverse | .[0].url // empty')
-                echo "🎵 Audio mode selected"
-              else
-                # Get video stream matching quality
-                DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r --arg q "${QUALITY}p" \
-                  '.videoStreams | map(select(.quality == $q)) | .[0].url // empty')
-
-                # If exact quality not found, get closest lower quality
-                if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-                  DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r \
-                    '.videoStreams | sort_by(.quality | gsub("p";"") | tonumber) | reverse | .[0].url // empty')
-                fi
-
-                # Get audio stream for merging
-                AUDIO_URL=$(echo "$RESPONSE" | jq -r '.audioStreams | sort_by(.bitrate) | reverse | .[0].url // empty')
-              fi
-
-              if [ -n "$DOWNLOAD_URL" ] && [ "$DOWNLOAD_URL" != "null" ]; then
-                echo "✅ Found streams on $INSTANCE"
-                break
-              fi
-            fi
-
-            echo "⚠️ Instance $INSTANCE failed, trying next..."
-          done
-
-          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-            echo "❌ Could not get download URL from any Piped instance"
-            exit 1
-          fi
-
-          echo "📥 Video title: $VIDEO_TITLE"
-
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-
-          if [ "$QUALITY" = "audio" ]; then
-            FILENAME="${VIDEO_TITLE}_${TIMESTAMP}.m4a"
-            echo "⬇️ Downloading audio: $FILENAME"
-
-            aria2c \
-              --split=4 \
-              --max-connection-per-server=4 \
-              --dir="tmp_downloads" \
-              --out="$FILENAME" \
-              "$DOWNLOAD_URL"
-          else
-            VIDEO_FILE="tmp_downloads/video_${TIMESTAMP}.mp4"
-            AUDIO_FILE="tmp_downloads/audio_${TIMESTAMP}.m4a"
-            FINAL_FILE="tmp_downloads/${VIDEO_TITLE}_${QUALITY}p_${TIMESTAMP}.mp4"
-
-            echo "⬇️ Downloading video stream..."
-            aria2c \
-              --split=4 \
-              --max-connection-per-server=4 \
-              --dir="." \
-              --out="$VIDEO_FILE" \
-              "$DOWNLOAD_URL"
-
-            if [ -n "$AUDIO_URL" ] && [ "$AUDIO_URL" != "null" ]; then
-              echo "⬇️ Downloading audio stream..."
-              aria2c \
-                --split=4 \
-                --max-connection-per-server=4 \
-                --dir="." \
-                --out="$AUDIO_FILE" \
-                "$AUDIO_URL"
-
-              echo "🔀 Merging video and audio with ffmpeg..."
-              ffmpeg -y -i "$VIDEO_FILE" -i "$AUDIO_FILE" -c:v copy -c:a aac "$FINAL_FILE"
-              rm -f "$VIDEO_FILE" "$AUDIO_FILE"
-            else
-              mv "$VIDEO_FILE" "$FINAL_FILE"
-            fi
-          fi
+          # Download using the POT provider plugin
+          yt-dlp \
+            --format "$FORMAT_STRING" \
+            --merge-output-format mp4 \
+            --output "tmp_downloads/%(title)s.%(ext)s" \
+            --no-playlist \
+            --restrict-filenames \
+            --extractor-args "youtube:player_client=web" \
+            --use-extractors youtube \
+            --retries 5 \
+            --verbose \
+            "$VIDEO_URL"
 
           echo "✅ Download completed!"
 
