@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube URL'
+        description: 'YouTube Video URL'
         required: true
         type: string
 
@@ -15,29 +15,31 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install yt-dlp
+      - name: Install yt-dlp and PO Token Plugin (bgutil-ytdlp-pot-provider)
         run: |
-          sudo apt update
-          sudo apt install -y ffmpeg
-          pip3 install --upgrade yt-dlp
+          # Install yt-dlp and the PO Token provider plugin
+          # The plugin will automatically fetch & provide a PO Token
+          python3 -m pip install --upgrade yt-dlp
+          python3 -m pip install bgutil-ytdlp-pot-provider
 
       - name: Create videos folder
         run: mkdir -p videos
 
-      - name: Write cookies from secret
-        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
-
-      - name: Download video
+      - name: Download video using PO Token
+        env:
+          YT_URL: ${{ github.event.inputs.url }}
         run: |
           cd videos
-          yt-dlp --cookies ../cookies.txt -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
+          # The --verbose flag outputs detailed logs for debugging if needed
+          yt-dlp --verbose "$YT_URL"
 
-      - name: Commit and push
+      - name: Commit and push video
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add videos/
-          git commit -m "Add video" || echo "No changes"
+          git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
           git push
