@@ -1,4 +1,4 @@
-name: Download YouTube Video (No Cookies)
+name: Download YouTube Video (EJS Node only)
 
 on:
   workflow_dispatch:
@@ -17,35 +17,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install yt-dlp with curl_cffi and ffmpeg
-        run: |
-          sudo apt update
-          sudo apt install -y ffmpeg zip
-          pip install --upgrade pip
-          pip install "yt-dlp[default,curl_cffi]"
+      - name: Setup yt-dlp (EJS Node + FFmpeg enabled by default)
+        uses: AnimMouse/setup-yt-dlp@v3
+        # ejs-node and ffmpeg are true by default – no need to specify
 
       - name: Create downloads folder
         run: mkdir -p downloads
 
-      - name: Download video using TLS impersonation
+      - name: Download video (no cookies, relies on EJS Node)
         run: |
           cd downloads
-          yt-dlp \
-            --impersonate chrome \
-            --extractor-args "youtube:player_client=android" \
-            --extractor-args "youtube:include_annotations=0" \
-            -f "bestvideo+bestaudio/best" \
-            -o "%(title)s.%(ext)s" \
-            "${{ github.event.inputs.url }}"
+          yt-dlp -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
 
-      - name: Split files larger than 90MB into zip parts
+      - name: Split files >90MB into zip parts
         run: |
           cd downloads
           for f in *; do
-            if [ -f "$f" ] && [ $(stat -c%s "$f") -gt $((90 * 1024 * 1024)) ]; then
-              echo "✂️ Splitting $f"
-              zip -s 90m "${f%.*}.zip" "$f"
-              rm "$f"
+            if [ -f "$f" ] && [ $(stat -c%s "$f") -gt $((90*1024*1024)) ]; then
+              zip -s 90m "${f%.*}.zip" "$f" && rm "$f"
             fi
           done
 
