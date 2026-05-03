@@ -1,4 +1,4 @@
-name: Download YouTube Video (Setup yt-dlp Action)
+name: Download YouTube Video
 
 on:
   workflow_dispatch:
@@ -18,10 +18,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup yt-dlp
+      - name: Setup yt-dlp (with EJS Node and FFmpeg)
         uses: AnimMouse/setup-yt-dlp@v3
+        with:
+          ejs-node: true
+          ffmpeg: true
 
-      - name: Setup yt-dlp YouTube cookies (bypass bot detection)
+      - name: Setup yt-dlp YouTube cookies
         uses: AnimMouse/setup-yt-dlp/cookies@v3
         with:
           cookies: ${{ secrets.YOUTUBE_COOKIES }}
@@ -29,15 +32,15 @@ jobs:
       - name: Create downloads folder
         run: mkdir -p downloads
 
-      - name: Download YouTube video to folder
+      - name: Download video
         run: |
           cd downloads
           yt-dlp -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
 
-      - name: Commit and push video
+      - name: Commit and push
         run: |
           git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config user.email "actions@github.com"
           git add downloads/
           git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
           git push
