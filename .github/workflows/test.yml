@@ -1,4 +1,4 @@
-name: Download YouTube Video with Proxy Router
+name: Download YouTube Video with yt-dlp-proxy (Patched)
 
 on:
   workflow_dispatch:
@@ -17,52 +17,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Install Python, pip, and other necessary tools
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip ffmpeg zip make
+          sudo apt update
+          sudo apt install -y python3-pip ffmpeg zip make
 
-      # 2. Install yt-dlp-proxy (Method by building from source)
-      - name: Install yt-dlp-proxy
+      - name: Clone and patch yt-dlp-proxy
         run: |
           git clone https://github.com/Petrprogs/yt-dlp-proxy.git
           cd yt-dlp-proxy
+          # Change the hardcoded path from /usr/local/proxy.json to ./proxy.json
+          sed -i 's|/usr/local/proxy.json|./proxy.json|g' main.py
           make build
           sudo make install
           cd ..
           rm -rf yt-dlp-proxy
 
-      # 3. Update the proxy list and perform a speed test to find the best one.
-      # This step may take some time as it tests the proxies.
-      - name: Update and test proxy list
-        run: yt-dlp-proxy update --max-workers 10
+      - name: Update proxy list (writes to current directory)
+        run: |
+          # Create empty proxy.json in current dir
+          touch proxy.json
+          yt-dlp-proxy update --max-workers 10
 
-      # 4. Create directory and download the video using the best found proxy.
-      - name: Download video using found proxy
+      - name: Download video
         run: |
           mkdir -p downloads
           cd downloads
-          # The command forwards all arguments to yt-dlp
           yt-dlp-proxy -f "bestvideo+bestaudio/best" -o "%(title)s.%(ext)s" "${{ github.event.inputs.url }}"
 
-      # 5. Split file into 90MB parts if it exceeds 90MB
-      - name: Split large video files
+      - name: Split into 90MB zip parts
         run: |
           cd downloads
-          for file in *; do
-            if [ -f "$file" ] && [ $(stat -c%s "$file") -gt $((90 * 1024 * 1024)) ]; then
-              echo "Splitting $file into 90MB zip parts..."
-              zip -s 90m "${file%.*}.zip" "$file"
-              rm "$file"
+          for f in *; do
+            if [ -f "$f" ] && [ $(stat -c%s "$f") -gt $((90*1024*1024)) ]; then
+              zip -s 90m "${f%.*}.zip" "$f" && rm "$f"
             fi
           done
 
-      # 6. Commit and push the downloaded file(s) to the repository
       - name: Commit and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
           git add downloads/
           git diff --staged --quiet || git commit -m "Add YouTube video from ${{ github.event.inputs.url }}"
           git push
