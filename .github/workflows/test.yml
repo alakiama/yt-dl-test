@@ -1,4 +1,4 @@
-name: Get Direct YouTube URL (Official API)
+name: Get Direct YouTube Video URL
 
 on:
   workflow_dispatch:
@@ -7,61 +7,78 @@ on:
         description: 'YouTube Video URL'
         required: true
         type: string
+      format:
+        description: 'Format (bestvideo+bestaudio/best)'
+        required: false
+        default: 'best'
+        type: choice
+        options: ['best', 'bestvideo+bestaudio']
 
 permissions:
   contents: write
 
 jobs:
-  extract-url:
+  get-url:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Video ID from URL
-        id: get_id
+      - name: Install yt-dlp and PO Token Provider
         run: |
-          VIDEO_ID=$(echo "${{ github.event.inputs.url }}" | grep -oE 'v=([^&]+)' | cut -d'=' -f2)
-          echo "VIDEO_ID=$VIDEO_ID" >> $GITHUB_ENV
-          echo "Extracted Video ID: $VIDEO_ID"
+          # Install yt-dlp and the PO Token provider
+          python3 -m pip install --upgrade yt-dlp
+          python3 -m pip install bgutil-ytdlp-pot-provider
 
-      - name: Download and Run YouTube API Script
-        env:
-          YT_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          VIDEO_ID: ${{ env.VIDEO_ID }}
+      - name: Setup PO Token Server
         run: |
-          sudo apt update
-          sudo apt install -y jq curl
+          # Start the PO token provider as a service (Docker approach, most reliable)
+          docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
+          # Give the server a moment to start
+          sleep 5
+          # Test that the server is responding
+          curl -s -X POST http://localhost:4416/api/v1/token -H "Content-Type: application/json" -d '{"videoId": "dQw4w9WgXcQ"}' && echo "PO token provider ready" || echo "PO token provider not responding yet"
+
+      - name: Extract Direct URL
+        id: extract_url
+        run: |
+          # Create a file to output the URL
+          mkdir -p output
           
-          # Fetch video details from YouTube Data API
-          curl -s "https://www.googleapis.com/youtube/v3/videos?part=contentDetails,player&id=${VIDEO_ID}&key=${YT_API_KEY}" > response.json
+          # Extract URL using PO token auth and specific extractor args
+          yt-dlp \
+            --extractor-args "youtube:po_token_provider=bgutil-http://localhost:4416" \
+            --extractor-args "youtube:player_client=android" \
+            -g \
+            -f "${{ github.event.inputs.format }}" \
+            "${{ github.event.inputs.url }}" 2>&1 | tee output/direct_url.txt
           
-          # Extract the direct embed URL safely
-          DIRECT_URL=$(jq -r '.items[0].player.embedHtml' response.json | grep -oP '(?<=src=")[^"]*')
+          # Get first line from the output (should be the direct URL)
+          DIRECT_URL=$(head -1 output/direct_url.txt)
           
-          # Fallback extraction in case embedHtml URL isn't available or is malformed
-          if [ -z "$DIRECT_URL" ] || [ "$DIRECT_URL" == "null" ]; then
-            DIRECT_URL="https://www.youtube.com/embed/${VIDEO_ID}"
-            echo "API embedHtml URL not found (maybe API key issue or API response missing). Using fallback URL: $DIRECT_URL"
+          if [ -z "$DIRECT_URL" ]; then
+            echo "ERROR: Failed to extract direct URL"
+            exit 1
           fi
+          
+          echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
+          echo "Successfully extracted direct URL: $DIRECT_URL"
 
-          echo "DIRECT_URL=$DIRECT_URL" >> $GITHUB_ENV
-          echo "Direct URL: $DIRECT_URL"
-
-      - name: Save URL to Repository
+      - name: Save URL to repository
         run: |
           mkdir -p output
-          echo "Video URL: ${{ github.event.inputs.url }}" > output/direct_url.txt
-          echo "Direct Streaming URL: $DIRECT_URL" >> output/direct_url.txt
-          echo " " >> output/direct_url.txt
-          echo "Note: This is an embed URL provided by YouTube's official API." >> output/direct_url.txt
-          echo "It needs to be processed further to get actual streamable video file URLs." >> output/direct_url.txt
-          echo "For more info, check: https://stackoverflow.com/questions/42573645" >> output/direct_url.txt
+          echo "Original URL: ${{ github.event.inputs.url }}" > output/video_info.txt
+          echo "Extracted Direct URL: ${{ steps.extract_url.outputs.direct_url }}" >> output/video_info.txt
+          echo "Format: ${{ github.event.inputs.format }}" >> output/video_info.txt
+          echo "Extracted at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> output/video_info.txt
+          
+          # Also save just the direct URL to a simple file for easy access
+          echo "${{ steps.extract_url.outputs.direct_url }}" > output/stream_url.txt
 
-      - name: Commit and Push URL Info
+      - name: Commit and push
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add output/direct_url.txt
-          git diff --staged --quiet || git commit -m "Extracted direct embed URL for ${{ github.event.inputs.url }}"
+          git add output/
+          git diff --staged --quiet || git commit -m "Extract direct YouTube URL for ${{ github.event.inputs.url }}"
           git push
