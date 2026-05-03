@@ -26,12 +26,15 @@ jobs:
       - name: Create videos folder
         run: mkdir -p videos
 
+      - name: Set up cookies
+        run: |
+          echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
       - name: Download video
         run: |
           cd videos
           yt-dlp \
-            --extractor-args "youtube:player-client=android" \
-            --user-agent "Mozilla/5.0 (Linux; Android 13)" \
+            --cookies ../cookies.txt \
             -o "%(title)s.%(ext)s" \
             "${{ github.event.inputs.url }}"
 
