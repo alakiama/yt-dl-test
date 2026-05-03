@@ -7,12 +7,6 @@ on:
         description: 'YouTube Video URL'
         required: true
         type: string
-      format:
-        description: 'Format (bestvideo+bestaudio/best)'
-        required: false
-        default: 'best'
-        type: choice
-        options: ['best', 'bestvideo+bestaudio']
 
 permissions:
   contents: write
@@ -21,64 +15,22 @@ jobs:
   get-url:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install yt-dlp and PO Token Provider
+      - uses: actions/checkout@v4
+      - run: pip install yt-dlp bgutil-ytdlp-pot-provider
+      - run: docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider && sleep 5
+      - name: Extract URL (skip warnings)
         run: |
-          # Install yt-dlp and the PO Token provider
-          python3 -m pip install --upgrade yt-dlp
-          python3 -m pip install bgutil-ytdlp-pot-provider
-
-      - name: Setup PO Token Server
-        run: |
-          # Start the PO token provider as a service (Docker approach, most reliable)
-          docker run -d --name pot-provider -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
-          # Give the server a moment to start
-          sleep 5
-          # Test that the server is responding
-          curl -s -X POST http://localhost:4416/api/v1/token -H "Content-Type: application/json" -d '{"videoId": "dQw4w9WgXcQ"}' && echo "PO token provider ready" || echo "PO token provider not responding yet"
-
-      - name: Extract Direct URL
-        id: extract_url
-        run: |
-          # Create a file to output the URL
           mkdir -p output
-          
-          # Extract URL using PO token auth and specific extractor args
-          yt-dlp \
+          # Use 2>/dev/null to hide stderr (warnings), keep only stdout (the URL)
+          DIRECT_URL=$(yt-dlp \
             --extractor-args "youtube:po_token_provider=bgutil-http://localhost:4416" \
             --extractor-args "youtube:player_client=android" \
             -g \
-            -f "${{ github.event.inputs.format }}" \
-            "${{ github.event.inputs.url }}" 2>&1 | tee output/direct_url.txt
-          
-          # Get first line from the output (should be the direct URL)
-          DIRECT_URL=$(head -1 output/direct_url.txt)
-          
-          if [ -z "$DIRECT_URL" ]; then
-            echo "ERROR: Failed to extract direct URL"
-            exit 1
-          fi
-          
-          echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
-          echo "Successfully extracted direct URL: $DIRECT_URL"
-
-      - name: Save URL to repository
-        run: |
-          mkdir -p output
-          echo "Original URL: ${{ github.event.inputs.url }}" > output/video_info.txt
-          echo "Extracted Direct URL: ${{ steps.extract_url.outputs.direct_url }}" >> output/video_info.txt
-          echo "Format: ${{ github.event.inputs.format }}" >> output/video_info.txt
-          echo "Extracted at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> output/video_info.txt
-          
-          # Also save just the direct URL to a simple file for easy access
-          echo "${{ steps.extract_url.outputs.direct_url }}" > output/stream_url.txt
-
-      - name: Commit and push
-        run: |
+            "${{ github.event.inputs.url }}" 2>/dev/null | head -1)
+          echo "$DIRECT_URL" > output/stream_url.txt
+          echo "Direct URL: $DIRECT_URL"
+      - run: |
           git config user.name "github-actions"
-          git config user.email "actions@github.com"
           git add output/
-          git diff --staged --quiet || git commit -m "Extract direct YouTube URL for ${{ github.event.inputs.url }}"
+          git commit -m "Add direct URL" || true
           git push
