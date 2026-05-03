@@ -1,40 +1,17 @@
-name: Download YouTube Video via Cobalt API
+name: Test YouTube Download with Free Proxy
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube Video URL'
+        description: 'YouTube URL'
         required: true
-        type: string
-
-permissions:
-  contents: write
 
 jobs:
-  download:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install jq
-        run: sudo apt install -y jq
-      - name: Get direct link and download
-        run: |
-          mkdir -p downloads
-          cd downloads
-          RESPONSE=$(curl -s -X POST https://api.cobalt.tools/api/json \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            -d "{\"url\":\"${{ github.event.inputs.url }}\"}")
-          DIRECT_URL=$(echo "$RESPONSE" | jq -r '.url')
-          if [ "$DIRECT_URL" = "null" ]; then
-            echo "Error: $RESPONSE"
-            exit 1
-          fi
-          wget --content-disposition "$DIRECT_URL"
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions"
-          git add downloads/
-          git commit -m "Add video" || true
-          git push
+      - run: pip install yt-dlp
+      - run: |
+          # Using a public free proxy (example, likely dead)
+          yt-dlp --proxy "http://103.152.172.40:80" -g "${{ github.event.inputs.url }}"
