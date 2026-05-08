@@ -940,14 +940,6 @@ jobs:
               fi
             fi
 
-              FA_AUTO=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
-              if [ "$FA_AUTO" -gt 0 ]; then
-                echo "✅ Auto-translated Persian subtitle downloaded."
-              else
-                echo "⚠️  Persian subtitle not available for this video (neither native nor auto-translated)."
-              fi
-            fi
-
             # ── Step 3: Sanitize subtitle filenames (spaces → dashes) ──────────
             echo ""
             echo "→ Subtitle files saved:"
