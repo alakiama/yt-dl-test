@@ -782,6 +782,11 @@ jobs:
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           mapfile -t URL_LIST < /tmp/yt_urls.txt
 
+          # Shared yt-dlp flags for subtitle downloads
+          # NOTE: --output template uses %(title)s only (no ext) so yt-dlp appends
+          #       the language+format automatically: Title.en.vtt, Title.fa.vtt etc.
+          SUB_PROXY_FLAGS="--proxy socks5://127.0.0.1:1080 --no-playlist --no-check-certificates --extractor-args youtube:player_client=web --js-runtimes deno --remote-components ejs:github"
+
           URL_INDEX=0
           while IFS='|' read -r ORIGINAL_NAME FOLDER_NAME; do
             URL_INDEX=$((URL_INDEX + 1))
@@ -792,6 +797,10 @@ jobs:
             SUBTITLE_DIR="$BACKUP_DIR/${FOLDER_NAME}/subtitle"
             mkdir -p "$SUBTITLE_DIR"
 
+            # With --skip-download, %(ext)s = video container (mp4/webm) so yt-dlp
+            # would produce Title.mp4.fa.vtt — use no extension in the template.
+            OUT_TMPL="${SUBTITLE_DIR}/%(title)s"
+
             echo ""
             echo "============================================================"
             echo "Downloading subtitles for: $FOLDER_NAME"
@@ -799,85 +808,79 @@ jobs:
             echo "============================================================"
 
             # ── Step 1: Download all available original subtitles ─────────────
-            echo "→ Fetching original subtitles (all languages)..."
+            echo "→ Fetching all original subtitles..."
             yt-dlp \
-              --proxy "socks5://127.0.0.1:1080" \
+              $SUB_PROXY_FLAGS \
               --write-sub \
               --all-subs \
+              --sub-format "vtt/srt/best" \
+              --convert-subs vtt \
               --skip-download \
-              --no-playlist \
-              --no-check-certificates \
-              --extractor-args "youtube:player_client=web" \
-              --js-runtimes deno \
-              --remote-components ejs:github \
-              --output "${SUBTITLE_DIR}/%(title)s.%(ext)s" \
-              "$URL" 2>&1 || echo "Original subtitle download attempt finished (may have none)"
+              --output "$OUT_TMPL" \
+              "$URL" 2>&1 || true
 
-            # ── Step 2: Download Persian subtitle or auto-translate ───────────
+            # ── Step 2: Persian subtitle — native first, auto-translate fallback ─
             echo ""
-            echo "→ Checking for Persian (fa) subtitle..."
+            echo "→ Checking for native Persian (fa) subtitle..."
 
-            # Try to get native Persian subtitle first
-            NATIVE_FA_FOUND=false
-            yt-dlp \
-              --proxy "socks5://127.0.0.1:1080" \
-              --write-sub \
-              --sub-langs "fa" \
-              --skip-download \
-              --no-playlist \
-              --no-check-certificates \
-              --extractor-args "youtube:player_client=web" \
-              --js-runtimes deno \
-              --remote-components ejs:github \
-              --output "${SUBTITLE_DIR}/%(title)s.%(ext)s" \
-              "$URL" 2>&1 && NATIVE_FA_FOUND=true || true
+            # Count fa files before attempting
+            FA_BEFORE=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
 
-            # Check if any fa subtitle file was actually written
-            if find "$SUBTITLE_DIR" -name "*.fa.*" -o -name "*-fa.*" 2>/dev/null | grep -q .; then
-              NATIVE_FA_FOUND=true
-              echo "✅ Native Persian subtitle found and downloaded."
-            else
-              NATIVE_FA_FOUND=false
+            if [ "$FA_BEFORE" -eq 0 ]; then
+              # Not downloaded by --all-subs — try explicit native fa
+              yt-dlp \
+                $SUB_PROXY_FLAGS \
+                --write-sub \
+                --sub-langs "fa" \
+                --sub-format "vtt/srt/best" \
+                --convert-subs vtt \
+                --skip-download \
+                --output "$OUT_TMPL" \
+                "$URL" 2>&1 || true
             fi
 
-            if [ "$NATIVE_FA_FOUND" = false ]; then
-              echo "→ No native Persian subtitle found — downloading auto-translated Persian..."
+            FA_AFTER=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
+
+            if [ "$FA_AFTER" -gt 0 ]; then
+              echo "✅ Native Persian subtitle found."
+            else
+              echo "→ No native Persian subtitle — trying auto-translated Persian..."
               yt-dlp \
-                --proxy "socks5://127.0.0.1:1080" \
+                $SUB_PROXY_FLAGS \
                 --write-auto-sub \
                 --sub-langs "fa" \
+                --sub-format "vtt/srt/best" \
+                --convert-subs vtt \
                 --skip-download \
-                --no-playlist \
-                --no-check-certificates \
-                --extractor-args "youtube:player_client=web" \
-                --js-runtimes deno \
-                --remote-components ejs:github \
-                --output "${SUBTITLE_DIR}/%(title)s.%(ext)s" \
-                "$URL" 2>&1 || echo "Auto-translated Persian subtitle not available either."
+                --output "$OUT_TMPL" \
+                "$URL" 2>&1 || true
 
-              if find "$SUBTITLE_DIR" -name "*.fa.*" -o -name "*-fa.*" 2>/dev/null | grep -q .; then
+              FA_AUTO=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
+              if [ "$FA_AUTO" -gt 0 ]; then
                 echo "✅ Auto-translated Persian subtitle downloaded."
               else
-                echo "⚠️  Persian subtitle (native or auto-translate) not available for this video."
+                echo "⚠️  Persian subtitle not available for this video (neither native nor auto-translated)."
               fi
             fi
 
-            # ── Step 3: Sanitize subtitle filenames ───────────────────────────
+            # ── Step 3: Sanitize subtitle filenames (spaces → dashes) ──────────
             echo ""
-            echo "→ Subtitle files in ${SUBTITLE_DIR}:"
-            for SUB_FILE in "$SUBTITLE_DIR"/*; do
-              [ -f "$SUB_FILE" ] || continue
-              # Replace spaces with dashes to match the rest of the workflow naming
-              NEW_NAME=$(basename "$SUB_FILE" | sed 's/ /-/g' | sed 's/　/-/g' | tr -s '-')
-              if [ "$(basename "$SUB_FILE")" != "$NEW_NAME" ]; then
-                mv "$SUB_FILE" "$SUBTITLE_DIR/$NEW_NAME"
+            echo "→ Subtitle files saved:"
+            find "$SUBTITLE_DIR" -type f | while read -r SUB_FILE; do
+              DIR=$(dirname "$SUB_FILE")
+              BASE=$(basename "$SUB_FILE")
+              NEW_NAME=$(echo "$BASE" | sed 's/ /-/g' | sed 's/　/-/g' | tr -s '-')
+              if [ "$BASE" != "$NEW_NAME" ]; then
+                mv "$SUB_FILE" "$DIR/$NEW_NAME"
+                echo "  • $NEW_NAME  (renamed)"
+              else
+                echo "  • $NEW_NAME"
               fi
-              echo "  • $NEW_NAME"
             done
 
             SUB_COUNT=$(find "$SUBTITLE_DIR" -type f 2>/dev/null | wc -l)
             if [ "$SUB_COUNT" -eq 0 ]; then
-              echo "  (no subtitles downloaded for this video)"
+              echo "  (no subtitles available for this video)"
               rmdir "$SUBTITLE_DIR" 2>/dev/null || true
             else
               echo "✅ $SUB_COUNT subtitle file(s) saved to subtitle/"
@@ -887,6 +890,8 @@ jobs:
 
           echo ""
           echo "Subtitle download phase complete."
+          echo "=== Final backup dir structure ==="
+          find "$BACKUP_DIR" -type f | sort
 
       - name: Stop WARP Container
         if: always()
