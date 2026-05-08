@@ -940,27 +940,70 @@ jobs:
               fi
             fi
 
-            # ── Step 3: Sanitize subtitle filenames (spaces → dashes) ──────────
-            echo ""
-            echo "→ Subtitle files saved:"
-            find "$SUBTITLE_DIR" -type f | while read -r SUB_FILE; do
-              DIR=$(dirname "$SUB_FILE")
-              BASE=$(basename "$SUB_FILE")
-              NEW_NAME=$(echo "$BASE" | sed 's/ /-/g' | sed 's/　/-/g' | tr -s '-')
-              if [ "$BASE" != "$NEW_NAME" ]; then
-                mv "$SUB_FILE" "$DIR/$NEW_NAME"
-                echo "  • $NEW_NAME  (renamed)"
-              else
-                echo "  • $NEW_NAME"
-              fi
-            done
-
+            # ── Step 3: Zip all subtitles → subtitle.zip, patch README ──────────
             SUB_COUNT=$(find "$SUBTITLE_DIR" -type f 2>/dev/null | wc -l)
+
             if [ "$SUB_COUNT" -eq 0 ]; then
               echo "  (no subtitles available for this video)"
               rmdir "$SUBTITLE_DIR" 2>/dev/null || true
             else
-              echo "✅ $SUB_COUNT subtitle file(s) saved to subtitle/"
+              echo ""
+              echo "→ Subtitle files downloaded ($SUB_COUNT file(s)):"
+              find "$SUBTITLE_DIR" -type f | while read -r SUB_FILE; do
+                echo "  • $(basename "$SUB_FILE")"
+              done
+
+              # Create subtitle.zip inside the video folder (not inside subtitle/)
+              ZIP_PATH="$BACKUP_DIR/${FOLDER_NAME}/subtitle.zip"
+              echo ""
+              echo "→ Zipping subtitles → subtitle.zip ..."
+              (cd "$SUBTITLE_DIR" && zip -j "$ZIP_PATH" ./* 2>&1)
+              rm -rf "$SUBTITLE_DIR"
+
+              ZIP_SIZE_MB=$(echo "scale=2; $(stat -c%s "$ZIP_PATH") / 1024 / 1024" | bc)
+              echo "✅ subtitle.zip created (${ZIP_SIZE_MB} MB)"
+
+              # Build the raw download link for subtitle.zip
+              FOLDER_ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$FOLDER_NAME")
+              SUB_ZIP_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('subtitle.zip', safe=''))")
+              SUB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${SUB_ZIP_ENCODED}"
+
+              # Patch the existing README.md — append subtitle section before the last footer
+              README_FILE="$BACKUP_DIR/${FOLDER_NAME}/README.md"
+              if [ -f "$README_FILE" ]; then
+                # Write a temp file with the subtitle section
+                SUB_SECTION_FILE=$(mktemp)
+                {
+                  printf '%s\n' ""
+                  printf '%s\n' "---"
+                  printf '%s\n' ""
+                  printf '%s\n' "## 🔤 Subtitles"
+                  printf '%s\n' ""
+                  printf '%s\n' "| # | File | Link |"
+                  printf '%s\n' "|---|------|------|"
+                  printf '%s\n' "| 1 | \`subtitle.zip\` | [Download](${SUB_RAW_LINK}) |"
+                  printf '%s\n' ""
+                  printf '%s\n' "> Contains all available subtitle languages. Extract to get \`.vtt\` files."
+                  printf '%s\n' ""
+                } > "$SUB_SECTION_FILE"
+
+                # Find line number of last "---" in the README (the footer separator)
+                LAST_SEP=$(grep -n "^---$" "$README_FILE" | tail -1 | cut -d: -f1)
+                if [ -n "$LAST_SEP" ]; then
+                  # Insert subtitle section before that last "---"
+                  INSERT_AT=$((LAST_SEP - 1))
+                  head -n "$INSERT_AT" "$README_FILE" > "${README_FILE}.tmp"
+                  cat "$SUB_SECTION_FILE" >> "${README_FILE}.tmp"
+                  tail -n "+$((INSERT_AT + 1))" "$README_FILE" >> "${README_FILE}.tmp"
+                  mv "${README_FILE}.tmp" "$README_FILE"
+                  echo "README patched with subtitle download link."
+                else
+                  # No separator found — just append
+                  cat "$SUB_SECTION_FILE" >> "$README_FILE"
+                  echo "README appended with subtitle download link."
+                fi
+                rm -f "$SUB_SECTION_FILE"
+              fi
             fi
 
           done < /tmp/video_info.txt
