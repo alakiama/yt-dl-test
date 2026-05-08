@@ -782,10 +782,42 @@ jobs:
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           mapfile -t URL_LIST < /tmp/yt_urls.txt
 
-          # Shared yt-dlp flags for subtitle downloads
-          # NOTE: --output template uses %(title)s only (no ext) so yt-dlp appends
-          #       the language+format automatically: Title.en.vtt, Title.fa.vtt etc.
-          SUB_PROXY_FLAGS="--proxy socks5://127.0.0.1:1080 --no-playlist --no-check-certificates --extractor-args youtube:player_client=web --js-runtimes deno --remote-components ejs:github"
+          # Subtitle client strategy:
+          # The "web" client requires a PO Token for subtitles (YouTube enforcement).
+          # "mweb" and "android_vr" clients do NOT require PO Token for subtitles
+          # and are the same clients your video downloader uses as fallback methods 4 & 5.
+          # We try multiple clients in order so subtitles are fetched even if one fails.
+
+          sub_download() {
+            local MODE=$1        # "all", "fa-native", "fa-auto"
+            local OUT="$2"
+            local URL="$3"
+            local SUCCESS=false
+
+            for CLIENT in mweb android_vr web; do
+              echo "  [subtitle] trying client: $CLIENT ..."
+
+              case $MODE in
+                all)
+                  yt-dlp                     --proxy "socks5://127.0.0.1:1080"                     --extractor-args "youtube:player_client=${CLIENT}"                     --write-sub --all-subs                     --sub-format "vtt/srt/best" --convert-subs vtt                     --skip-download --no-playlist --no-check-certificates                     --output "$OUT" "$URL" 2>&1 && SUCCESS=true || true
+                  ;;
+                fa-native)
+                  yt-dlp                     --proxy "socks5://127.0.0.1:1080"                     --extractor-args "youtube:player_client=${CLIENT}"                     --write-sub --sub-langs "fa"                     --sub-format "vtt/srt/best" --convert-subs vtt                     --skip-download --no-playlist --no-check-certificates                     --output "$OUT" "$URL" 2>&1 && SUCCESS=true || true
+                  ;;
+                fa-auto)
+                  yt-dlp                     --proxy "socks5://127.0.0.1:1080"                     --extractor-args "youtube:player_client=${CLIENT}"                     --write-auto-sub --sub-langs "fa"                     --sub-format "vtt/srt/best" --convert-subs vtt                     --skip-download --no-playlist --no-check-certificates                     --output "$OUT" "$URL" 2>&1 && SUCCESS=true || true
+                  ;;
+              esac
+
+              # Stop trying more clients if we got actual subtitle files
+              local GOT=$(find "$(dirname "$OUT")" -type f -name "*.vtt" -o -name "*.srt" 2>/dev/null | wc -l)
+              if [ "$GOT" -gt 0 ]; then
+                echo "  [subtitle] ✅ Got subtitles via client: $CLIENT"
+                return 0
+              fi
+            done
+            return 1
+          }
 
           URL_INDEX=0
           while IFS='|' read -r ORIGINAL_NAME FOLDER_NAME; do
@@ -797,8 +829,9 @@ jobs:
             SUBTITLE_DIR="$BACKUP_DIR/${FOLDER_NAME}/subtitle"
             mkdir -p "$SUBTITLE_DIR"
 
-            # With --skip-download, %(ext)s = video container (mp4/webm) so yt-dlp
-            # would produce Title.mp4.fa.vtt — use no extension in the template.
+            # Output template: no %(ext)s — yt-dlp appends .LANG.vtt automatically.
+            # Using %(ext)s with --skip-download resolves to the video container (mp4)
+            # and produces ugly Title.mp4.fa.vtt filenames.
             OUT_TMPL="${SUBTITLE_DIR}/%(title)s"
 
             echo ""
@@ -807,53 +840,38 @@ jobs:
             echo "URL: $URL"
             echo "============================================================"
 
-            # ── Step 1: Download all available original subtitles ─────────────
-            echo "→ Fetching all original subtitles..."
-            yt-dlp \
-              $SUB_PROXY_FLAGS \
-              --write-sub \
-              --all-subs \
-              --sub-format "vtt/srt/best" \
-              --convert-subs vtt \
-              --skip-download \
-              --output "$OUT_TMPL" \
-              "$URL" 2>&1 || true
+            # ── Step 1: All original subtitles ────────────────────────────────
+            echo "→ Fetching all original subtitles (mweb/android_vr/web clients)..."
+            sub_download "all" "$OUT_TMPL" "$URL"
 
-            # ── Step 2: Persian subtitle — native first, auto-translate fallback ─
+            # ── Step 2: Persian — native first, auto-translate fallback ───────
             echo ""
-            echo "→ Checking for native Persian (fa) subtitle..."
+            echo "→ Checking for Persian (fa) subtitle..."
 
-            # Count fa files before attempting
-            FA_BEFORE=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
+            FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
 
-            if [ "$FA_BEFORE" -eq 0 ]; then
-              # Not downloaded by --all-subs — try explicit native fa
-              yt-dlp \
-                $SUB_PROXY_FLAGS \
-                --write-sub \
-                --sub-langs "fa" \
-                --sub-format "vtt/srt/best" \
-                --convert-subs vtt \
-                --skip-download \
-                --output "$OUT_TMPL" \
-                "$URL" 2>&1 || true
-            fi
-
-            FA_AFTER=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
-
-            if [ "$FA_AFTER" -gt 0 ]; then
-              echo "✅ Native Persian subtitle found."
+            if [ "$FA_COUNT" -gt 0 ]; then
+              echo "✅ Persian subtitle already present from all-subs download."
             else
-              echo "→ No native Persian subtitle — trying auto-translated Persian..."
-              yt-dlp \
-                $SUB_PROXY_FLAGS \
-                --write-auto-sub \
-                --sub-langs "fa" \
-                --sub-format "vtt/srt/best" \
-                --convert-subs vtt \
-                --skip-download \
-                --output "$OUT_TMPL" \
-                "$URL" 2>&1 || true
+              echo "→ Persian not in all-subs — trying native fa explicitly..."
+              sub_download "fa-native" "$OUT_TMPL" "$URL"
+
+              FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+
+              if [ "$FA_COUNT" -eq 0 ]; then
+                echo "→ No native Persian — trying auto-translated Persian..."
+                sub_download "fa-auto" "$OUT_TMPL" "$URL"
+
+                FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+                if [ "$FA_COUNT" -gt 0 ]; then
+                  echo "✅ Auto-translated Persian subtitle downloaded."
+                else
+                  echo "⚠️  Persian subtitle unavailable for this video."
+                fi
+              else
+                echo "✅ Native Persian subtitle downloaded."
+              fi
+            fi
 
               FA_AUTO=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" -o -name "*[.-]fa[.-]*" \) 2>/dev/null | wc -l)
               if [ "$FA_AUTO" -gt 0 ]; then
