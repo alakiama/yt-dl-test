@@ -782,40 +782,107 @@ jobs:
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           mapfile -t URL_LIST < /tmp/yt_urls.txt
 
-          # Subtitle client strategy:
-          # The "web" client requires a PO Token for subtitles (YouTube enforcement).
-          # "mweb" and "android_vr" clients do NOT require PO Token for subtitles
-          # and are the same clients your video downloader uses as fallback methods 4 & 5.
-          # We try multiple clients in order so subtitles are fetched even if one fails.
+          # Subtitle download mirrors the exact same bot-bypass strategy as the video
+          # downloader: same 8 methods, same proxy, same deno+EJS JS solver, same
+          # user-agents. Only the yt-dlp flags differ (subtitle flags vs format flags).
 
           sub_download() {
-            local MODE=$1        # "all", "fa-native", "fa-auto"
+            local MODE=$1      # "all", "fa-native", "fa-auto"
             local OUT="$2"
-            local URL="$3"
-            local SUCCESS=false
+            local SURL="$3"
+            local SUB_DIR
+            SUB_DIR=$(dirname "$OUT")
 
-            for CLIENT in mweb android_vr web; do
-              echo "  [subtitle] trying client: $CLIENT ..."
+            # Check helper: count subtitle files written so far
+            sub_count() { find "$SUB_DIR" -type f \( -name "*.vtt" -o -name "*.srt" \) 2>/dev/null | wc -l; }
+            fa_count()  { find "$SUB_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l; }
 
+            # Build the sub-mode flags
+            sub_flags() {
               case $MODE in
-                all)
-                  yt-dlp                     --proxy "socks5://127.0.0.1:1080"                     --extractor-args "youtube:player_client=${CLIENT}"                     --write-sub --all-subs                     --sub-format "vtt/srt/best" --convert-subs vtt                     --skip-download --no-playlist --no-check-certificates                     --output "$OUT" "$URL" 2>&1 && SUCCESS=true || true
+                all)      echo "--write-sub --all-subs" ;;
+                fa-native) echo "--write-sub --sub-langs fa" ;;
+                fa-auto)  echo "--write-auto-sub --sub-langs fa" ;;
+              esac
+            }
+            SFLAGS=$(sub_flags)
+            COMMON_SUB="--sub-format vtt/srt/best --convert-subs vtt --skip-download --no-playlist --no-check-certificates --output ${OUT}"
+
+            for METHOD in 1 2 3 4 5 6 7 8; do
+              echo "  [subtitle] method $METHOD ..."
+              case $METHOD in
+                1)
+                  yt-dlp \
+                    --proxy "socks5://127.0.0.1:1080" \
+                    --extractor-args "youtube:player_client=web" \
+                    --js-runtimes deno \
+                    --remote-components ejs:github \
+                    --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+                    --add-header "Accept-Language:en-US,en;q=0.9" \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
                   ;;
-                fa-native)
-                  yt-dlp                     --proxy "socks5://127.0.0.1:1080"                     --extractor-args "youtube:player_client=${CLIENT}"                     --write-sub --sub-langs "fa"                     --sub-format "vtt/srt/best" --convert-subs vtt                     --skip-download --no-playlist --no-check-certificates                     --output "$OUT" "$URL" 2>&1 && SUCCESS=true || true
+                2)
+                  yt-dlp \
+                    --proxy "socks5://127.0.0.1:1080" \
+                    --extractor-args "youtube:player_client=web" \
+                    --js-runtimes deno \
+                    --remote-components ejs:npm \
+                    --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+                    --add-header "Accept-Language:en-US,en;q=0.9" \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
                   ;;
-                fa-auto)
-                  yt-dlp                     --proxy "socks5://127.0.0.1:1080"                     --extractor-args "youtube:player_client=${CLIENT}"                     --write-auto-sub --sub-langs "fa"                     --sub-format "vtt/srt/best" --convert-subs vtt                     --skip-download --no-playlist --no-check-certificates                     --output "$OUT" "$URL" 2>&1 && SUCCESS=true || true
+                3)
+                  yt-dlp \
+                    --proxy "socks5://127.0.0.1:1080" \
+                    --extractor-args "youtube:player_client=web,mweb,android_vr" \
+                    --js-runtimes deno \
+                    --remote-components ejs:github \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
+                  ;;
+                4)
+                  yt-dlp \
+                    --proxy "socks5://127.0.0.1:1080" \
+                    --extractor-args "youtube:player_client=mweb" \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
+                  ;;
+                5)
+                  yt-dlp \
+                    --proxy "socks5://127.0.0.1:1080" \
+                    --extractor-args "youtube:player_client=android_vr" \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
+                  ;;
+                6)
+                  yt-dlp \
+                    --extractor-args "youtube:player_client=web" \
+                    --js-runtimes deno \
+                    --remote-components ejs:github \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
+                  ;;
+                7)
+                  yt-dlp \
+                    --extractor-args "youtube:player_client=mweb" \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
+                  ;;
+                8)
+                  yt-dlp \
+                    --proxy "socks5://127.0.0.1:1080" \
+                    --extractor-args "youtube:player_client=android" \
+                    --user-agent "Mozilla/5.0 (Linux; Android 12; SM-S906N Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36" \
+                    $SFLAGS $COMMON_SUB "$SURL" 2>&1 || true
                   ;;
               esac
 
-              # Stop trying more clients if we got actual subtitle files
-              local GOT=$(find "$(dirname "$OUT")" -type f -name "*.vtt" -o -name "*.srt" 2>/dev/null | wc -l)
-              if [ "$GOT" -gt 0 ]; then
-                echo "  [subtitle] ✅ Got subtitles via client: $CLIENT"
-                return 0
+              # Stop as soon as we have subtitle files
+              if [ "$MODE" = "fa-native" ] || [ "$MODE" = "fa-auto" ]; then
+                [ "$(fa_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
+              else
+                [ "$(sub_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
               fi
+
+              sleep 1
             done
+
+            echo "  [subtitle] ⚠️  all 8 methods failed for mode: $MODE"
             return 1
           }
 
