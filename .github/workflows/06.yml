@@ -710,6 +710,17 @@ jobs:
                   {
                     printf '%s\n' "# ${FILENAME_NO_EXT}"
                     printf '%s\n' ""
+
+                    # Add thumbnail if it exists
+                    if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg" ]; then
+                      THUMB_ENCODED=$(urlencode "thumbnail.jpg")
+                      THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
+                      printf '%s\n' "<div align=\"center\">"
+                      printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
+                      printf '%s\n' "</div>"
+                      printf '%s\n' ""
+                    fi
+
                     printf '%s\n' "---"
                     printf '%s\n' ""
                     printf '%s\n' "## Video Information"
@@ -762,6 +773,17 @@ jobs:
                   {
                     printf '%s\n' "# ${FILENAME_NO_EXT}"
                     printf '%s\n' ""
+
+                    # Add thumbnail if it exists
+                    if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg" ]; then
+                      THUMB_ENCODED=$(urlencode "thumbnail.jpg")
+                      THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
+                      printf '%s\n' "<div align=\"center\">"
+                      printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
+                      printf '%s\n' "</div>"
+                      printf '%s\n' ""
+                    fi
+
                     printf '%s\n' "---"
                     printf '%s\n' ""
                     printf '%s\n' "## Video Information"
