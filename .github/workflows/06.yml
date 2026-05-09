@@ -889,8 +889,15 @@ jobs:
               elif [ "$MODE" = "en-auto" ]; then
                 [ "$(en_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
               elif [ "$MODE" = "auto-both" ]; then
-                # Success if we got ANY subtitles (en or fa)
-                [ "$(sub_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
+                # Success only if we got BOTH languages (en AND fa)
+                local EN_GOT=$(en_count)
+                local FA_GOT=$(fa_count)
+                if [ "$EN_GOT" -gt 0 ] && [ "$FA_GOT" -gt 0 ]; then
+                  echo "  [subtitle] ✅ success with method $METHOD (both en+fa downloaded)"
+                  return 0
+                elif [ "$EN_GOT" -gt 0 ] || [ "$FA_GOT" -gt 0 ]; then
+                  echo "  [subtitle] ⚠️  method $METHOD: partial success (en:$EN_GOT, fa:$FA_GOT), trying next method..."
+                fi
               else
                 [ "$(sub_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
               fi
@@ -965,6 +972,32 @@ jobs:
                 echo "✅ Auto-generated Persian subtitle downloaded."
               else
                 echo "⚠️  Persian auto-generated subtitle unavailable."
+              fi
+
+              # ── Step 3.1: Retry missing subtitles individually ───
+              # If we still don't have both, try downloading them separately
+              if [ "$EN_COUNT" -eq 0 ]; then
+                echo ""
+                echo "→ Retrying English auto-generated subtitle separately..."
+                sub_download "en-auto" "$OUT_TMPL" "$URL" || true
+                EN_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.en.vtt" -o -name "*.en.srt" \) 2>/dev/null | wc -l)
+                if [ "$EN_COUNT" -gt 0 ]; then
+                  echo "✅ English subtitle downloaded on retry."
+                else
+                  echo "⚠️  English subtitle still unavailable after retry."
+                fi
+              fi
+
+              if [ "$FA_COUNT" -eq 0 ]; then
+                echo ""
+                echo "→ Retrying Persian auto-generated subtitle separately..."
+                sub_download "fa-auto" "$OUT_TMPL" "$URL" || true
+                FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+                if [ "$FA_COUNT" -gt 0 ]; then
+                  echo "✅ Persian subtitle downloaded on retry."
+                else
+                  echo "⚠️  Persian subtitle still unavailable after retry."
+                fi
               fi
             fi
 
