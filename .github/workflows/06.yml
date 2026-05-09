@@ -25,6 +25,11 @@ on:
         required: false
         default: ''
         type: string
+      download_subtitles:
+        description: '📝 Download subtitles (English & Persian)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   download-youtube:
@@ -123,6 +128,7 @@ jobs:
 
           QUALITY="${YT_QUALITY}"
           ZIP_PASSWORD="${YT_PASSWORD}"
+          DOWNLOAD_SUBS="${{ github.event.inputs.download_subtitles }}"
 
           # REDUCED from 90MB to 45MB - under GitHub's 50MB recommendation
           SPLIT_MB=45
@@ -145,6 +151,11 @@ jobs:
             echo "Password protection: ENABLED"
           else
             echo "Password protection: DISABLED"
+          fi
+          if [ "$DOWNLOAD_SUBS" = "true" ]; then
+            echo "Subtitles: ENABLED (en, fa)"
+          else
+            echo "Subtitles: DISABLED"
           fi
           echo ""
 
@@ -772,6 +783,7 @@ jobs:
           cat /tmp/video_info.txt
 
       - name: Download Subtitles
+        if: ${{ github.event.inputs.download_subtitles == 'true' }}
         run: |
           # ──────────────────────────────────────────────────────────────────────
           # SUBTITLE DOWNLOADER
