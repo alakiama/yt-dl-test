@@ -795,7 +795,7 @@ jobs:
           # user-agents. Only the yt-dlp flags differ (subtitle flags vs format flags).
 
           sub_download() {
-            local MODE=$1      # "all", "fa-native", "fa-auto", "en-auto"
+            local MODE=$1      # "all", "fa-native", "fa-auto", "en-auto", "auto-both"
             local OUT="$2"
             local SURL="$3"
             local SUB_DIR
@@ -809,10 +809,11 @@ jobs:
             # Build the sub-mode flags
             sub_flags() {
               case $MODE in
-                all)       echo "--write-sub --sub-langs fa,en" ;;
-                fa-native) echo "--write-sub --sub-langs fa" ;;
-                fa-auto)   echo "--write-auto-sub --sub-langs fa" ;;
-                en-auto)   echo "--write-auto-sub --sub-langs en" ;;
+                all)        echo "--write-sub --sub-langs fa,en" ;;
+                fa-native)  echo "--write-sub --sub-langs fa" ;;
+                fa-auto)    echo "--write-auto-sub --sub-langs fa" ;;
+                en-auto)    echo "--write-auto-sub --sub-langs en" ;;
+                auto-both)  echo "--write-auto-sub --sub-langs en,fa" ;;
               esac
             }
             SFLAGS=$(sub_flags)
@@ -887,6 +888,9 @@ jobs:
                 [ "$(fa_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
               elif [ "$MODE" = "en-auto" ]; then
                 [ "$(en_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
+              elif [ "$MODE" = "auto-both" ]; then
+                # Success if we got ANY subtitles (en or fa)
+                [ "$(sub_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
               else
                 [ "$(sub_count)" -gt 0 ] && { echo "  [subtitle] ✅ success with method $METHOD"; return 0; }
               fi
@@ -923,44 +927,44 @@ jobs:
             echo "→ Fetching all original subtitles (en, fa, and others)..."
             sub_download "all" "$OUT_TMPL" "$URL" || true
 
-            # ── Step 2: English subtitle (native or auto-generated) ───────────
+            # ── Step 2: Check what we got and download auto-generated if needed ─
             echo ""
-            echo "→ Checking for English (en) subtitle..."
+            echo "→ Checking downloaded subtitles..."
 
             EN_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.en.vtt" -o -name "*.en.srt" \) 2>/dev/null | wc -l)
+            FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
 
             if [ "$EN_COUNT" -gt 0 ]; then
-              echo "✅ English subtitle already present (native)."
+              echo "✅ English subtitle present (native)."
             else
-              echo "→ No native English — downloading auto-generated English..."
-              sub_download "en-auto" "$OUT_TMPL" "$URL" || true
+              echo "⚠️  No native English subtitle."
+            fi
+
+            if [ "$FA_COUNT" -gt 0 ]; then
+              echo "✅ Persian subtitle present (native)."
+            else
+              echo "⚠️  No native Persian subtitle."
+            fi
+
+            # ── Step 3: Download auto-generated subtitles (en + fa together) ───
+            if [ "$EN_COUNT" -eq 0 ] || [ "$FA_COUNT" -eq 0 ]; then
+              echo ""
+              echo "→ Downloading auto-generated subtitles (en, fa)..."
+              sub_download "auto-both" "$OUT_TMPL" "$URL" || true
 
               EN_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.en.vtt" -o -name "*.en.srt" \) 2>/dev/null | wc -l)
+              FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+
               if [ "$EN_COUNT" -gt 0 ]; then
                 echo "✅ Auto-generated English subtitle downloaded."
               else
-                echo "⚠️  English subtitle unavailable (no native or auto-generated)."
+                echo "⚠️  English auto-generated subtitle unavailable."
               fi
-            fi
-
-            # ── Step 3: Persian subtitle (native or auto-generated) ───────────
-            echo ""
-            echo "→ Checking for Persian (fa) subtitle..."
-
-            FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
-
-            if [ "$FA_COUNT" -gt 0 ]; then
-              echo "✅ Persian subtitle already present (native)."
-            else
-              echo "→ No native Persian — downloading auto-generated Persian..."
-              sub_download "fa-auto" "$OUT_TMPL" "$URL" || true
-
-              FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
 
               if [ "$FA_COUNT" -gt 0 ]; then
                 echo "✅ Auto-generated Persian subtitle downloaded."
               else
-                echo "⚠️  Persian subtitle unavailable (no native or auto-generated)."
+                echo "⚠️  Persian auto-generated subtitle unavailable."
               fi
             fi
 
