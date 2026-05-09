@@ -193,11 +193,11 @@ jobs:
             echo "Trying download method $METHOD..."
 
             if [ "$QUALITY" = "audio" ]; then
-              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline --write-sub --write-auto-sub --sub-langs en,fa --sub-format vtt/srt/best --convert-subs vtt"
             elif [ "$QUALITY" = "best" ]; then
-              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline --write-sub --write-auto-sub --sub-langs en,fa --sub-format vtt/srt/best --convert-subs vtt"
             else
-              COMMON_FLAGS="--merge-output-format mp4 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline --write-sub --write-auto-sub --sub-langs en,fa --sub-format vtt/srt/best --convert-subs vtt"
             fi
 
             case $METHOD in
@@ -364,11 +364,11 @@ jobs:
             local TMP_DIR=$3
             echo "Trying download method $METHOD..."
             if [ "$QUALITY" = "audio" ]; then
-              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline --write-sub --write-auto-sub --sub-langs en,fa --sub-format vtt/srt/best --convert-subs vtt"
             elif [ "$QUALITY" = "best" ]; then
-              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline --write-sub --write-auto-sub --sub-langs en,fa --sub-format vtt/srt/best --convert-subs vtt"
             else
-              COMMON_FLAGS="--merge-output-format mp4 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline --write-sub --write-auto-sub --sub-langs en,fa --sub-format vtt/srt/best --convert-subs vtt"
             fi
             case $METHOD in
               1)
@@ -528,14 +528,35 @@ jobs:
             echo "Files in $TMP_DIR:"
             ls -la "$TMP_DIR/"
 
+            # ── Extract subtitle files (downloaded with video) ────────────────
+            echo ""
+            echo "→ Checking for downloaded subtitles..."
+            SUBTITLE_FILES=$(find "$TMP_DIR" -type f \( -name "*.vtt" -o -name "*.srt" \) 2>/dev/null || true)
+            if [ -n "$SUBTITLE_FILES" ]; then
+              SUB_COUNT=$(echo "$SUBTITLE_FILES" | wc -l)
+              echo "✅ Found $SUB_COUNT subtitle file(s) downloaded with video:"
+              echo "$SUBTITLE_FILES" | while read -r SUBFILE; do
+                echo "  • $(basename "$SUBFILE")"
+              done
+              # Subtitles will be processed along with their corresponding video
+            else
+              echo "  No subtitles were downloaded (may not be available for this video)"
+            fi
+
             # ── Process each downloaded file ──────────────────────────────────
             FILE_INDEX=0
             for FILE in "$TMP_DIR"/*; do
               [ -f "$FILE" ] || continue
-              SIZE=$(stat -c%s "$FILE")
+
+              # Skip subtitle files - they'll be processed with their video
               BASENAME=$(basename "$FILE")
-              FILENAME_NO_EXT="${BASENAME%.*}"
               EXT="${BASENAME##*.}"
+              if [ "$EXT" = "vtt" ] || [ "$EXT" = "srt" ]; then
+                continue
+              fi
+
+              SIZE=$(stat -c%s "$FILE")
+              FILENAME_NO_EXT="${BASENAME%.*}"
               FILE_INDEX=$((FILE_INDEX + 1))
 
               FILENAME_NO_EXT=$(sanitize_name "$FILENAME_NO_EXT")
@@ -550,6 +571,30 @@ jobs:
               echo "Created backup folder: $BACKUP_DIR/${FINAL_FOLDER_NAME}"
 
               echo "${FILENAME_NO_EXT}|${FINAL_FOLDER_NAME}" >> /tmp/video_info.txt
+
+              # ── Handle subtitle files for this video ──────────────────────────
+              SUBTITLE_TEMP_DIR="${TMP_DIR}/subtitle_temp_$"
+              mkdir -p "$SUBTITLE_TEMP_DIR"
+
+              # Find subtitle files matching this video (same base name or close match)
+              MATCHING_SUBS=$(find "$TMP_DIR" -type f \( -name "*.vtt" -o -name "*.srt" \) 2>/dev/null | grep -F "$(echo "$FILENAME_NO_EXT" | head -c 20)" || true)
+
+              if [ -n "$MATCHING_SUBS" ]; then
+                echo "  → Found subtitle files for this video, packaging them..."
+                echo "$MATCHING_SUBS" | while read -r SUBFILE; do
+                  cp "$SUBFILE" "$SUBTITLE_TEMP_DIR/" 2>/dev/null || true
+                done
+
+                SUB_FILE_COUNT=$(find "$SUBTITLE_TEMP_DIR" -type f 2>/dev/null | wc -l)
+                if [ "$SUB_FILE_COUNT" -gt 0 ]; then
+                  (cd "$SUBTITLE_TEMP_DIR" && zip -j "$BACKUP_DIR/${FINAL_FOLDER_NAME}/subtitle.zip" ./* 2>&1) || true
+                  if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/subtitle.zip" ]; then
+                    ZIP_SIZE_KB=$(echo "scale=0; $(stat -c%s "$BACKUP_DIR/${FINAL_FOLDER_NAME}/subtitle.zip" 2>/dev/null || echo "0") / 1024" | bc 2>/dev/null || echo "0")
+                    echo "  ✅ Created subtitle.zip (${ZIP_SIZE_KB}KB with $SUB_FILE_COUNT subtitle files)"
+                  fi
+                fi
+              fi
+              rm -rf "$SUBTITLE_TEMP_DIR"
 
               FOLDER_ENCODED=$(urlencode "${FINAL_FOLDER_NAME}")
 
@@ -649,6 +694,23 @@ jobs:
                     printf '%s\n' "| **Android** | Tap \`${MAIN_ZIP}\` in your file manager — or use [ZArchiver](https://play.google.com/store/apps/details?id=ru.zdevs.zarchiver) |"
                   fi
                   printf '%s\n' ""
+
+                  # Add subtitle section if subtitle.zip exists
+                  if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/subtitle.zip" ]; then
+                    SUB_ZIP_ENCODED=$(urlencode "subtitle.zip")
+                    SUB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${SUB_ZIP_ENCODED}"
+                    printf '%s\n' "---"
+                    printf '%s\n' ""
+                    printf '%s\n' "## 🔤 Subtitles"
+                    printf '%s\n' ""
+                    printf '%s\n' "| # | File | Link |"
+                    printf '%s\n' "|---|------|------|"
+                    printf '%s\n' "| 1 | \`subtitle.zip\` | [Download](${SUB_RAW_LINK}) |"
+                    printf '%s\n' ""
+                    printf '%s\n' "> Contains all available subtitle languages (en, fa). Extract to get \`.vtt\` files."
+                    printf '%s\n' ""
+                  fi
+
                   printf '%s\n' "---"
                   printf '%s\n' ""
                   printf '%s\n' "*This tool created by [avasam.ir](https://avasam.ir)*"
@@ -704,6 +766,23 @@ jobs:
                     printf '%s\n' "| **Linux** | \`unzip ${FINAL_FOLDER_NAME}.zip\` → enter password |"
                     printf '%s\n' "| **Android** | Tap the file in your file manager → enter password |"
                     printf '%s\n' ""
+
+                    # Add subtitle section if subtitle.zip exists
+                    if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/subtitle.zip" ]; then
+                      SUB_ZIP_ENCODED=$(urlencode "subtitle.zip")
+                      SUB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${SUB_ZIP_ENCODED}"
+                      printf '%s\n' "---"
+                      printf '%s\n' ""
+                      printf '%s\n' "## 🔤 Subtitles"
+                      printf '%s\n' ""
+                      printf '%s\n' "| # | File | Link |"
+                      printf '%s\n' "|---|------|------|"
+                      printf '%s\n' "| 1 | \`subtitle.zip\` | [Download](${SUB_RAW_LINK}) |"
+                      printf '%s\n' ""
+                      printf '%s\n' "> Contains all available subtitle languages (en, fa). Extract to get \`.vtt\` files."
+                      printf '%s\n' ""
+                    fi
+
                     printf '%s\n' "---"
                     printf '%s\n' ""
                     printf '%s\n' "*This tool created by [avasam.ir](https://avasam.ir)*"
@@ -749,6 +828,23 @@ jobs:
                     printf '%s\n' ""
                     printf '%s\n' "Ready to use — no extraction needed!"
                     printf '%s\n' ""
+
+                    # Add subtitle section if subtitle.zip exists
+                    if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/subtitle.zip" ]; then
+                      SUB_ZIP_ENCODED=$(urlencode "subtitle.zip")
+                      SUB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${SUB_ZIP_ENCODED}"
+                      printf '%s\n' "---"
+                      printf '%s\n' ""
+                      printf '%s\n' "## 🔤 Subtitles"
+                      printf '%s\n' ""
+                      printf '%s\n' "| # | File | Link |"
+                      printf '%s\n' "|---|------|------|"
+                      printf '%s\n' "| 1 | \`subtitle.zip\` | [Download](${SUB_RAW_LINK}) |"
+                      printf '%s\n' ""
+                      printf '%s\n' "> Contains all available subtitle languages (en, fa). Extract to get \`.vtt\` files."
+                      printf '%s\n' ""
+                    fi
+
                     printf '%s\n' "---"
                     printf '%s\n' ""
                     printf '%s\n' "*This tool created by [avasam.ir](https://avasam.ir)*"
@@ -771,15 +867,15 @@ jobs:
           echo "===== Video info file ====="
           cat /tmp/video_info.txt
 
-      - name: Download Subtitles
+      - name: Download Subtitles (Fallback)
         continue-on-error: true
         run: |
           set +e  # Don't exit on errors - we want to continue even if subtitle download fails
           # ──────────────────────────────────────────────────────────────────────
-          # SUBTITLE DOWNLOADER
-          # • Downloads original subtitles (all languages) if they exist
-          # • Downloads Persian (fa) subtitles — or auto-translates if missing
-          # • Saves everything to: videos/<video_folder>/subtitle/
+          # SUBTITLE DOWNLOADER (FALLBACK)
+          # • This step only runs if subtitles weren't downloaded with the video
+          # • Tries to download subtitles separately using the same methods
+          # • If this fails, videos will still be pushed without subtitles
           # ──────────────────────────────────────────────────────────────────────
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
           REPO_OWNER=$(cat /tmp/yt_repo_owner.txt)
@@ -897,6 +993,14 @@ jobs:
             URL="${URL_LIST[$((URL_INDEX - 1))]}"
 
             [ -z "$FOLDER_NAME" ] && continue
+
+            # Skip if subtitles were already downloaded with the video
+            if [ -f "$BACKUP_DIR/${FOLDER_NAME}/subtitle.zip" ]; then
+              echo "✅ Subtitles already exist for $FOLDER_NAME (downloaded with video), skipping fallback."
+              continue
+            fi
+
+            echo "→ No subtitles found for $FOLDER_NAME, trying fallback download..."
 
             # Wrap each video's subtitle download in error handling
             (
@@ -1019,7 +1123,8 @@ jobs:
           done < /tmp/video_info.txt
 
           echo ""
-          echo "Subtitle download phase complete."
+          echo "Subtitle fallback download phase complete."
+          echo "Note: Most subtitles should have been downloaded with the video in the previous step."
           echo "=== Final backup dir structure ==="
           find "$BACKUP_DIR" -type f 2>/dev/null | sort || echo "Backup dir listing failed, but continuing..."
 
