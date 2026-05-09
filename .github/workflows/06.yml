@@ -780,6 +780,9 @@ jobs:
           # • Saves everything to: videos/<video_folder>/subtitle/
           # ──────────────────────────────────────────────────────────────────────
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
+          REPO_OWNER=$(cat /tmp/yt_repo_owner.txt)
+          REPO_NAME=$(cat /tmp/yt_repo_name.txt)
+          BRANCH=$(cat /tmp/yt_branch.txt)
           mapfile -t URL_LIST < /tmp/yt_urls.txt
 
           # Subtitle download mirrors the exact same bot-bypass strategy as the video
