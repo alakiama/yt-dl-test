@@ -2,5 +2,6 @@
 
 ----
 
-- 1 - 🎮 [The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith](https://github.com/keepfiless/yt-dl-test/tree/main/videos/The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith)
-- 2 - 🎦 [The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith_ocean_7083](https://github.com/keepfiless/yt-dl-test/tree/main/videos/The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith_ocean_7083)
+- 1 - 📺 [The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith](https://github.com/keepfiless/yt-dl-test/tree/main/videos/The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith)
+- 2 - 🎞️ [The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith_mountain_15424](https://github.com/keepfiless/yt-dl-test/tree/main/videos/The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith_mountain_15424)
+- 3 - 🎬 [The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith_ocean_7083](https://github.com/keepfiless/yt-dl-test/tree/main/videos/The-rise-and-fall-of-the-Mughal-Empire-Stephanie-Honchell-Smith_ocean_7083)
