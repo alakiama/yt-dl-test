@@ -7,6 +7,11 @@ on:
         description: '🔗 YouTube video URL(s) — separate multiple URLs with spaces'
         required: true
         type: string
+      download_subtitles:
+        description: '📝 Download subtitles (English & Persian)'
+        required: false
+        default: false
+        type: boolean
       quality:
         description: '🎬 Video quality'
         required: false
@@ -25,11 +30,6 @@ on:
         required: false
         default: ''
         type: string
-      download_subtitles:
-        description: '📝 Download subtitles (English & Persian)'
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   download-youtube:
