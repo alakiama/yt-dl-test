@@ -772,7 +772,9 @@ jobs:
           cat /tmp/video_info.txt
 
       - name: Download Subtitles
+        continue-on-error: true
         run: |
+          set +e  # Don't exit on errors - we want to continue even if subtitle download fails
           # ──────────────────────────────────────────────────────────────────────
           # SUBTITLE DOWNLOADER
           # • Downloads original subtitles (all languages) if they exist
@@ -896,8 +898,12 @@ jobs:
 
             [ -z "$FOLDER_NAME" ] && continue
 
-            SUBTITLE_DIR="$BACKUP_DIR/${FOLDER_NAME}/subtitle"
-            mkdir -p "$SUBTITLE_DIR"
+            # Wrap each video's subtitle download in error handling
+            (
+              set +e  # Don't exit on errors for this video
+
+              SUBTITLE_DIR="$BACKUP_DIR/${FOLDER_NAME}/subtitle"
+              mkdir -p "$SUBTITLE_DIR" || { echo "⚠️  Failed to create subtitle dir for $FOLDER_NAME"; exit 0; }
 
             # Output template: no %(ext)s — yt-dlp appends .LANG.vtt automatically.
             # Using %(ext)s with --skip-download resolves to the video container (mp4)
@@ -912,27 +918,27 @@ jobs:
 
             # ── Step 1: All original subtitles ────────────────────────────────
             echo "→ Fetching all original subtitles (mweb/android_vr/web clients)..."
-            sub_download "all" "$OUT_TMPL" "$URL"
+            sub_download "all" "$OUT_TMPL" "$URL" || echo "⚠️  Failed to download all subtitles, continuing..."
 
             # ── Step 2: Persian — native first, auto-translate fallback ───────
             echo ""
             echo "→ Checking for Persian (fa) subtitle..."
 
-            FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+            FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l || echo "0")
 
             if [ "$FA_COUNT" -gt 0 ]; then
               echo "✅ Persian subtitle already present from all-subs download."
             else
               echo "→ Persian not in all-subs — trying native fa explicitly..."
-              sub_download "fa-native" "$OUT_TMPL" "$URL"
+              sub_download "fa-native" "$OUT_TMPL" "$URL" || echo "⚠️  Failed to download native Persian, continuing..."
 
-              FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+              FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l || echo "0")
 
               if [ "$FA_COUNT" -eq 0 ]; then
                 echo "→ No native Persian — trying auto-translated Persian..."
-                sub_download "fa-auto" "$OUT_TMPL" "$URL"
+                sub_download "fa-auto" "$OUT_TMPL" "$URL" || echo "⚠️  Failed to download auto-translated Persian, continuing..."
 
-                FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
+                FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l || echo "0")
                 if [ "$FA_COUNT" -gt 0 ]; then
                   echo "✅ Auto-translated Persian subtitle downloaded."
                 else
@@ -944,7 +950,7 @@ jobs:
             fi
 
             # ── Step 3: Zip all subtitles → subtitle.zip, patch README ──────────
-            SUB_COUNT=$(find "$SUBTITLE_DIR" -type f 2>/dev/null | wc -l)
+            SUB_COUNT=$(find "$SUBTITLE_DIR" -type f 2>/dev/null | wc -l || echo "0")
 
             if [ "$SUB_COUNT" -eq 0 ]; then
               echo "  (no subtitles available for this video)"
@@ -952,30 +958,30 @@ jobs:
             else
               echo ""
               echo "→ Subtitle files downloaded ($SUB_COUNT file(s)):"
-              find "$SUBTITLE_DIR" -type f | while read -r SUB_FILE; do
+              find "$SUBTITLE_DIR" -type f 2>/dev/null | while read -r SUB_FILE; do
                 echo "  • $(basename "$SUB_FILE")"
-              done
+              done || true
 
               # Create subtitle.zip inside the video folder (not inside subtitle/)
               ZIP_PATH="$BACKUP_DIR/${FOLDER_NAME}/subtitle.zip"
               echo ""
               echo "→ Zipping subtitles → subtitle.zip ..."
-              (cd "$SUBTITLE_DIR" && zip -j "$ZIP_PATH" ./* 2>&1)
-              rm -rf "$SUBTITLE_DIR"
+              (cd "$SUBTITLE_DIR" && zip -j "$ZIP_PATH" ./* 2>&1) || { echo "⚠️  Failed to create subtitle.zip, skipping..."; rm -rf "$SUBTITLE_DIR" 2>/dev/null || true; exit 0; }
+              rm -rf "$SUBTITLE_DIR" || true
 
-              ZIP_SIZE_MB=$(echo "scale=2; $(stat -c%s "$ZIP_PATH") / 1024 / 1024" | bc)
+              ZIP_SIZE_MB=$(echo "scale=2; $(stat -c%s "$ZIP_PATH" 2>/dev/null || echo "0") / 1024 / 1024" | bc 2>/dev/null || echo "0")
               echo "✅ subtitle.zip created (${ZIP_SIZE_MB} MB)"
 
               # Build the raw download link for subtitle.zip
-              FOLDER_ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$FOLDER_NAME")
-              SUB_ZIP_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('subtitle.zip', safe=''))")
+              FOLDER_ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$FOLDER_NAME" 2>/dev/null || echo "$FOLDER_NAME")
+              SUB_ZIP_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('subtitle.zip', safe=''))" 2>/dev/null || echo "subtitle.zip")
               SUB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${SUB_ZIP_ENCODED}"
 
               # Patch the existing README.md — append subtitle section before the last footer
               README_FILE="$BACKUP_DIR/${FOLDER_NAME}/README.md"
               if [ -f "$README_FILE" ]; then
                 # Write a temp file with the subtitle section
-                SUB_SECTION_FILE=$(mktemp)
+                SUB_SECTION_FILE=$(mktemp) || { echo "⚠️  Failed to create temp file for README patching"; exit 0; }
                 {
                   printf '%s\n' ""
                   printf '%s\n' "---"
@@ -988,33 +994,37 @@ jobs:
                   printf '%s\n' ""
                   printf '%s\n' "> Contains all available subtitle languages. Extract to get \`.vtt\` files."
                   printf '%s\n' ""
-                } > "$SUB_SECTION_FILE"
+                } > "$SUB_SECTION_FILE" 2>/dev/null || { echo "⚠️  Failed to write subtitle section"; rm -f "$SUB_SECTION_FILE" 2>/dev/null || true; exit 0; }
 
                 # Find line number of last "---" in the README (the footer separator)
-                LAST_SEP=$(grep -n "^---$" "$README_FILE" | tail -1 | cut -d: -f1)
+                LAST_SEP=$(grep -n "^---$" "$README_FILE" 2>/dev/null | tail -1 | cut -d: -f1 || echo "")
                 if [ -n "$LAST_SEP" ]; then
                   # Insert subtitle section before that last "---"
                   INSERT_AT=$((LAST_SEP - 1))
-                  head -n "$INSERT_AT" "$README_FILE" > "${README_FILE}.tmp"
-                  cat "$SUB_SECTION_FILE" >> "${README_FILE}.tmp"
-                  tail -n "+$((INSERT_AT + 1))" "$README_FILE" >> "${README_FILE}.tmp"
-                  mv "${README_FILE}.tmp" "$README_FILE"
-                  echo "README patched with subtitle download link."
+                  head -n "$INSERT_AT" "$README_FILE" > "${README_FILE}.tmp" 2>/dev/null || { echo "⚠️  README patch failed"; rm -f "$SUB_SECTION_FILE" 2>/dev/null || true; exit 0; }
+                  cat "$SUB_SECTION_FILE" >> "${README_FILE}.tmp" 2>/dev/null || true
+                  tail -n "+$((INSERT_AT + 1))" "$README_FILE" >> "${README_FILE}.tmp" 2>/dev/null || true
+                  mv "${README_FILE}.tmp" "$README_FILE" 2>/dev/null && echo "README patched with subtitle download link." || echo "⚠️  README patch failed"
                 else
                   # No separator found — just append
-                  cat "$SUB_SECTION_FILE" >> "$README_FILE"
-                  echo "README appended with subtitle download link."
+                  cat "$SUB_SECTION_FILE" >> "$README_FILE" 2>/dev/null && echo "README appended with subtitle download link." || echo "⚠️  README append failed"
                 fi
-                rm -f "$SUB_SECTION_FILE"
+                rm -f "$SUB_SECTION_FILE" 2>/dev/null || true
               fi
             fi
+
+            ) || echo "⚠️  Subtitle download failed for $FOLDER_NAME, but continuing with video push..."
+            # End of error-isolated subtitle processing for this video
 
           done < /tmp/video_info.txt
 
           echo ""
           echo "Subtitle download phase complete."
           echo "=== Final backup dir structure ==="
-          find "$BACKUP_DIR" -type f | sort
+          find "$BACKUP_DIR" -type f 2>/dev/null | sort || echo "Backup dir listing failed, but continuing..."
+
+          # Ensure we exit with success even if there were subtitle download failures
+          exit 0
 
       - name: Stop WARP Container
         if: always()
