@@ -204,11 +204,11 @@ jobs:
             echo "Trying download method $METHOD..."
 
             if [ "$QUALITY" = "audio" ]; then
-              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --write-thumbnail --convert-thumbnails jpg --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             elif [ "$QUALITY" = "best" ]; then
-              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --write-thumbnail --convert-thumbnails jpg --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             else
-              COMMON_FLAGS="--merge-output-format mp4 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --write-thumbnail --convert-thumbnails jpg --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             fi
 
             case $METHOD in
@@ -375,11 +375,11 @@ jobs:
             local TMP_DIR=$3
             echo "Trying download method $METHOD..."
             if [ "$QUALITY" = "audio" ]; then
-              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --write-thumbnail --convert-thumbnails jpg --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             elif [ "$QUALITY" = "best" ]; then
-              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --write-thumbnail --convert-thumbnails jpg --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             else
-              COMMON_FLAGS="--merge-output-format mp4 --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--merge-output-format mp4 --write-thumbnail --convert-thumbnails jpg --no-cache-dir --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             fi
             case $METHOD in
               1)
@@ -543,6 +543,12 @@ jobs:
             FILE_INDEX=0
             for FILE in "$TMP_DIR"/*; do
               [ -f "$FILE" ] || continue
+
+              # Skip thumbnail files - we'll handle them separately
+              if [[ "$FILE" == *.jpg ]] || [[ "$FILE" == *.webp ]]; then
+                continue
+              fi
+
               SIZE=$(stat -c%s "$FILE")
               BASENAME=$(basename "$FILE")
               FILENAME_NO_EXT="${BASENAME%.*}"
@@ -559,6 +565,16 @@ jobs:
 
               mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
               echo "Created backup folder: $BACKUP_DIR/${FINAL_FOLDER_NAME}"
+
+              # ── Handle thumbnail (downloaded alongside video) ─────────────────
+              THUMB_FILE=$(ls "$TMP_DIR"/*.jpg 2>/dev/null | head -1)
+              if [ -n "$THUMB_FILE" ] && [ -f "$THUMB_FILE" ]; then
+                cp "$THUMB_FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg"
+                THUMB_SIZE_KB=$(echo "scale=2; $(stat -c%s "$THUMB_FILE" 2>/dev/null || echo 0) / 1024" | bc 2>/dev/null || echo "0")
+                echo "✅ Thumbnail saved: thumbnail.jpg (${THUMB_SIZE_KB} KB)"
+              else
+                echo "⚠️  No thumbnail found for this video"
+              fi
 
               echo "${FILENAME_NO_EXT}|${FINAL_FOLDER_NAME}" >> /tmp/video_info.txt
 
@@ -611,6 +627,17 @@ jobs:
                 {
                   printf '%s\n' "# ${FILENAME_NO_EXT}"
                   printf '%s\n' ""
+
+                  # Add thumbnail if it exists
+                  if [ -f "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnail.jpg" ]; then
+                    THUMB_ENCODED=$(urlencode "thumbnail.jpg")
+                    THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
+                    printf '%s\n' "<div align=\"center\">"
+                    printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
+                    printf '%s\n' "</div>"
+                    printf '%s\n' ""
+                  fi
+
                   printf '%s\n' "---"
                   printf '%s\n' ""
                   printf '%s\n' "## Video Information"
@@ -782,168 +809,9 @@ jobs:
           echo "===== Video info file ====="
           cat /tmp/video_info.txt
 
-      - name: Download Thumbnails
-        run: |
-          BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
-          REPO_OWNER=$(cat /tmp/yt_repo_owner.txt)
-          REPO_NAME=$(cat /tmp/yt_repo_name.txt)
-          BRANCH=$(cat /tmp/yt_branch.txt)
-          mapfile -t URL_LIST < /tmp/yt_urls.txt
-
-          urlencode() {
-            python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
-          }
-
-          echo ""
-          echo "============================================================"
-          echo "Starting thumbnail download process..."
-          echo "============================================================"
-
-          URL_INDEX=0
-          while IFS='|' read -r ORIGINAL_NAME FOLDER_NAME; do
-            URL_INDEX=$((URL_INDEX + 1))
-            URL="${URL_LIST[$((URL_INDEX - 1))]}"
-
-            [ -z "$FOLDER_NAME" ] && continue
-
-            VIDEO_FOLDER="$BACKUP_DIR/${FOLDER_NAME}"
-            README_FILE="$VIDEO_FOLDER/README.md"
-
-            echo ""
-            echo "→ Downloading thumbnail for: $FOLDER_NAME"
-            echo "  URL: $URL"
-
-            # Download thumbnail using yt-dlp
-            THUMB_SUCCESS=false
-            for METHOD in 1 2 3 4 5; do
-              echo "  Trying method $METHOD..."
-
-              case $METHOD in
-                1)
-                  # Method 1: web client with proxy
-                  yt-dlp \
-                    --proxy "socks5://127.0.0.1:1080" \
-                    --write-thumbnail \
-                    --skip-download \
-                    --convert-thumbnails jpg \
-                    --output "${VIDEO_FOLDER}/thumbnail" \
-                    --no-playlist \
-                    --extractor-args "youtube:player_client=web" \
-                    "$URL" 2>&1 || true
-                  ;;
-                2)
-                  # Method 2: mweb client with proxy
-                  yt-dlp \
-                    --proxy "socks5://127.0.0.1:1080" \
-                    --write-thumbnail \
-                    --skip-download \
-                    --convert-thumbnails jpg \
-                    --output "${VIDEO_FOLDER}/thumbnail" \
-                    --no-playlist \
-                    --extractor-args "youtube:player_client=mweb" \
-                    "$URL" 2>&1 || true
-                  ;;
-                3)
-                  # Method 3: android_vr client
-                  yt-dlp \
-                    --proxy "socks5://127.0.0.1:1080" \
-                    --write-thumbnail \
-                    --skip-download \
-                    --convert-thumbnails jpg \
-                    --output "${VIDEO_FOLDER}/thumbnail" \
-                    --no-playlist \
-                    --extractor-args "youtube:player_client=android_vr" \
-                    "$URL" 2>&1 || true
-                  ;;
-                4)
-                  # Method 4: web client without proxy
-                  yt-dlp \
-                    --write-thumbnail \
-                    --skip-download \
-                    --convert-thumbnails jpg \
-                    --output "${VIDEO_FOLDER}/thumbnail" \
-                    --no-playlist \
-                    --extractor-args "youtube:player_client=web" \
-                    "$URL" 2>&1 || true
-                  ;;
-                5)
-                  # Method 5: no client specification
-                  yt-dlp \
-                    --write-thumbnail \
-                    --skip-download \
-                    --convert-thumbnails jpg \
-                    --output "${VIDEO_FOLDER}/thumbnail" \
-                    --no-playlist \
-                    "$URL" 2>&1 || true
-                  ;;
-              esac
-
-              # Check if thumbnail was downloaded
-              if ls "${VIDEO_FOLDER}"/thumbnail*.jpg 2>/dev/null | grep -q .; then
-                echo "  ✅ Thumbnail downloaded successfully with method $METHOD"
-                THUMB_SUCCESS=true
-                break
-              fi
-
-              sleep 1
-            done
-
-            if [ "$THUMB_SUCCESS" = false ]; then
-              echo "  ⚠️  Could not download thumbnail for this video"
-              continue
-            fi
-
-            # Find the downloaded thumbnail file
-            THUMB_FILE=$(ls "${VIDEO_FOLDER}"/thumbnail*.jpg 2>/dev/null | head -1)
-
-            if [ -z "$THUMB_FILE" ] || [ ! -f "$THUMB_FILE" ]; then
-              echo "  ⚠️  Thumbnail file not found after download"
-              continue
-            fi
-
-            # Rename to simple name: thumbnail.jpg (only if it has a different name)
-            THUMB_BASENAME=$(basename "$THUMB_FILE")
-            if [ "$THUMB_BASENAME" != "thumbnail.jpg" ]; then
-              mv "$THUMB_FILE" "${VIDEO_FOLDER}/thumbnail.jpg"
-              echo "  Renamed: $THUMB_BASENAME → thumbnail.jpg"
-            fi
-            THUMB_FILE="${VIDEO_FOLDER}/thumbnail.jpg"
-
-            THUMB_SIZE_KB=$(echo "scale=2; $(stat -c%s "$THUMB_FILE" 2>/dev/null || echo 0) / 1024" | bc 2>/dev/null || echo "0")
-            echo "  ✅ Thumbnail saved: thumbnail.jpg (${THUMB_SIZE_KB} KB)"
-
-            # Update README.md to include thumbnail
-            if [ -f "$README_FILE" ]; then
-              FOLDER_ENCODED=$(urlencode "${FOLDER_NAME}")
-              THUMB_ENCODED=$(urlencode "thumbnail.jpg")
-              THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
-
-              # Create thumbnail section
-              THUMB_SECTION_FILE=$(mktemp 2>/dev/null || echo "/tmp/thumb_section_$")
-              if [ -n "$THUMB_SECTION_FILE" ]; then
-                {
-                  printf '%s\n' ""
-                  printf '%s\n' "<div align=\"center\">"
-                  printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
-                  printf '%s\n' "</div>"
-                  printf '%s\n' ""
-                } > "$THUMB_SECTION_FILE" 2>/dev/null || true
-
-                # Insert thumbnail right after the title (first line)
-                if head -n 1 "$README_FILE" > "${README_FILE}.tmp" 2>/dev/null; then
-                  cat "$THUMB_SECTION_FILE" >> "${README_FILE}.tmp" 2>/dev/null || true
-                  tail -n +2 "$README_FILE" >> "${README_FILE}.tmp" 2>/dev/null || true
-                  mv "${README_FILE}.tmp" "$README_FILE" 2>/dev/null && echo "  ✅ README updated with thumbnail" || echo "  ⚠️  README update failed"
-                fi
-
-                rm -f "$THUMB_SECTION_FILE" 2>/dev/null || true
-              fi
-            fi
-
-          done < /tmp/video_info.txt
-
-          echo ""
-          echo "✅ Thumbnail download process complete"
+      # NOTE: Thumbnail downloading is now integrated into the video download step
+      # Thumbnails are downloaded together with videos using --write-thumbnail flag
+      # This eliminates the need for a separate step and avoids re-triggering bot detection
 
       - name: Download Subtitles
         if: ${{ github.event.inputs.download_subtitles == 'true' }}
