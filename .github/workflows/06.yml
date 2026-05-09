@@ -1,4 +1,4 @@
-name: 06- 💾 You tube Downloader
+name: 01- 💾 You tube Downloader
 
 on:
   workflow_dispatch:
@@ -468,9 +468,27 @@ jobs:
             esac
           }
 
+          # Function to normalize YouTube URLs
+          normalize_youtube_url() {
+            local INPUT_URL="$1"
+            # Convert youtu.be short URLs to standard youtube.com format
+            if [[ "$INPUT_URL" =~ youtu\.be/([a-zA-Z0-9_-]+) ]]; then
+              VIDEO_ID="${BASH_REMATCH[1]}"
+              # Remove any query parameters from video ID
+              VIDEO_ID="${VIDEO_ID%%\?*}"
+              echo "https://www.youtube.com/watch?v=${VIDEO_ID}"
+            else
+              echo "$INPUT_URL"
+            fi
+          }
+
           URL_INDEX=0
           for URL in "${URL_LIST[@]}"; do
             URL_INDEX=$((URL_INDEX + 1))
+
+            # Normalize YouTube URL (convert short URLs to standard format)
+            URL=$(normalize_youtube_url "$URL")
+
             echo ""
             echo "============================================================"
             echo "Processing URL $URL_INDEX / $TOTAL_URLS : $URL"
@@ -633,8 +651,12 @@ jobs:
                     THUMB_ENCODED=$(urlencode "thumbnail.jpg")
                     THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
                     printf '%s\n' "<div align=\"center\">"
-                    printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
+                    printf '%s\n' "  <picture>"
+                    printf '%s\n' "    <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" width=\"400\" />"
+                    printf '%s\n' "  </picture>"
                     printf '%s\n' "</div>"
+                    printf '%s\n' ""
+                    printf '%s\n' "<br>"
                     printf '%s\n' ""
                   fi
 
@@ -716,8 +738,12 @@ jobs:
                       THUMB_ENCODED=$(urlencode "thumbnail.jpg")
                       THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
                       printf '%s\n' "<div align=\"center\">"
-                      printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
+                      printf '%s\n' "  <picture>"
+                      printf '%s\n' "    <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" width=\"400\" />"
+                      printf '%s\n' "  </picture>"
                       printf '%s\n' "</div>"
+                      printf '%s\n' ""
+                      printf '%s\n' "<br>"
                       printf '%s\n' ""
                     fi
 
@@ -779,8 +805,12 @@ jobs:
                       THUMB_ENCODED=$(urlencode "thumbnail.jpg")
                       THUMB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${THUMB_ENCODED}"
                       printf '%s\n' "<div align=\"center\">"
-                      printf '%s\n' "  <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" style=\"max-width: 250px; max-height: 250px;\">"
+                      printf '%s\n' "  <picture>"
+                      printf '%s\n' "    <img src=\"${THUMB_RAW_LINK}\" alt=\"Video Thumbnail\" width=\"400\" />"
+                      printf '%s\n' "  </picture>"
                       printf '%s\n' "</div>"
+                      printf '%s\n' ""
+                      printf '%s\n' "<br>"
                       printf '%s\n' ""
                     fi
 
@@ -1241,7 +1271,7 @@ jobs:
               echo ""
             } > "$MASTER_README"
 
-            VIDEO_EMOJIS=("🎬" "🎥" "📽️" "🎞️" "📺" "🎦" "🎭" "🎪" "🎯" "🎮" "🎵" "🎶" "🎸" "🎹" "🎤")
+            VIDEO_EMOJIS=("🎬" "🎥" "📽️" "🎞️" "📺" "🎦" "▶️")
 
             NUM=0
 
@@ -1528,5 +1558,5 @@ jobs:
           echo ""
           echo "=========================================="
           echo "All files pushed successfully!"
-          echo "AVASAM (https://avasam.ir)"
+          echo "made in AVASAM (https://avasam.ir)"
           echo "=========================================="
