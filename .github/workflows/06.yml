@@ -513,10 +513,12 @@ jobs:
                     [ -f "$DOWNLOADED_FILE" ] || continue
                     ACTUAL_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$DOWNLOADED_FILE" 2>/dev/null || echo "unknown")
                     echo "Requested quality: ${QUALITY}p | Actual video height: ${ACTUAL_HEIGHT}px"
-                    if [ "$ACTUAL_HEIGHT" != "unknown" ] && [ "$ACTUAL_HEIGHT" -lt $(( QUALITY - 50 )) ] 2>/dev/null; then
+                    if [ "$ACTUAL_HEIGHT" != "unknown" ] && [ "$ACTUAL_HEIGHT" -lt $(( QUALITY - 150 )) ] 2>/dev/null; then
                       echo "⚠️  Method $METHOD delivered ${ACTUAL_HEIGHT}p instead of ${QUALITY}p — rejecting and trying next method..."
                       QUALITY_OK=false
                       rm -f "$DOWNLOADED_FILE"
+                    elif [ "$ACTUAL_HEIGHT" != "unknown" ] && [ "$ACTUAL_HEIGHT" -lt "$QUALITY" ] 2>/dev/null; then
+                      echo "⚠️  Requested ${QUALITY}p but got ${ACTUAL_HEIGHT}p (close enough, accepting)"
                     else
                       echo "✅ Quality check passed (${ACTUAL_HEIGHT}p)."
                     fi
@@ -538,6 +540,14 @@ jobs:
                 if [ "$QUALITY_OK" = true ]; then
                   DOWNLOAD_SUCCESS=true
                   break
+                else
+                  # Quality not acceptable, but preserve thumbnail if it exists before cleaning up
+                  THUMB_TEMP=$(ls "$TMP_DIR"/*.jpg 2>/dev/null | head -1)
+                  if [ -n "$THUMB_TEMP" ] && [ -f "$THUMB_TEMP" ]; then
+                    mkdir -p "/tmp/saved_thumbnails_$"
+                    cp "$THUMB_TEMP" "/tmp/saved_thumbnails_$/thumb_${URL_INDEX}.jpg"
+                    echo "💾 Thumbnail saved for later use"
+                  fi
                 fi
               else
                 echo "Method $METHOD failed, waiting 3 seconds before next attempt..."
@@ -547,6 +557,13 @@ jobs:
 
             if [ "$DOWNLOAD_SUCCESS" = false ]; then
               echo "❌ All download methods failed for URL: $URL — skipping."
+
+              # Check if we saved a thumbnail during quality rejection attempts
+              if [ -f "/tmp/saved_thumbnails_$/thumb_${URL_INDEX}.jpg" ]; then
+                echo "📌 Found saved thumbnail, will use it anyway"
+                # We'll handle this in the file processing section
+              fi
+
               rm -rf "$TMP_DIR"
               continue
             fi
