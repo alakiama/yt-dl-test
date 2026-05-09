@@ -923,52 +923,44 @@ jobs:
             echo "→ Fetching all original subtitles (en, fa, and others)..."
             sub_download "all" "$OUT_TMPL" "$URL" || true
 
-            # ── Step 2: English — native first, auto-translate fallback ───────
+            # ── Step 2: English subtitle (native or auto-generated) ───────────
             echo ""
             echo "→ Checking for English (en) subtitle..."
 
             EN_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.en.vtt" -o -name "*.en.srt" \) 2>/dev/null | wc -l)
 
             if [ "$EN_COUNT" -gt 0 ]; then
-              echo "✅ English subtitle already present from all-subs download."
+              echo "✅ English subtitle already present (native)."
             else
-              echo "→ English not in all-subs — trying auto-generated English..."
+              echo "→ No native English — downloading auto-generated English..."
               sub_download "en-auto" "$OUT_TMPL" "$URL" || true
 
               EN_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.en.vtt" -o -name "*.en.srt" \) 2>/dev/null | wc -l)
               if [ "$EN_COUNT" -gt 0 ]; then
                 echo "✅ Auto-generated English subtitle downloaded."
               else
-                echo "⚠️  English subtitle unavailable for this video."
+                echo "⚠️  English subtitle unavailable (no native or auto-generated)."
               fi
             fi
 
-            # ── Step 3: Persian — native first, auto-translate fallback ───────
+            # ── Step 3: Persian subtitle (native or auto-generated) ───────────
             echo ""
             echo "→ Checking for Persian (fa) subtitle..."
 
             FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
 
             if [ "$FA_COUNT" -gt 0 ]; then
-              echo "✅ Persian subtitle already present from all-subs download."
+              echo "✅ Persian subtitle already present (native)."
             else
-              echo "→ Persian not in all-subs — trying native fa explicitly..."
-              sub_download "fa-native" "$OUT_TMPL" "$URL" || true
+              echo "→ No native Persian — downloading auto-generated Persian..."
+              sub_download "fa-auto" "$OUT_TMPL" "$URL" || true
 
               FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
 
-              if [ "$FA_COUNT" -eq 0 ]; then
-                echo "→ No native Persian — trying auto-generated Persian..."
-                sub_download "fa-auto" "$OUT_TMPL" "$URL" || true
-
-                FA_COUNT=$(find "$SUBTITLE_DIR" -type f \( -name "*.fa.vtt" -o -name "*.fa.srt" \) 2>/dev/null | wc -l)
-                if [ "$FA_COUNT" -gt 0 ]; then
-                  echo "✅ Auto-generated Persian subtitle downloaded."
-                else
-                  echo "⚠️  Persian subtitle unavailable for this video."
-                fi
+              if [ "$FA_COUNT" -gt 0 ]; then
+                echo "✅ Auto-generated Persian subtitle downloaded."
               else
-                echo "✅ Native Persian subtitle downloaded."
+                echo "⚠️  Persian subtitle unavailable (no native or auto-generated)."
               fi
             fi
 
