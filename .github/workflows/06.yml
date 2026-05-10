@@ -172,25 +172,28 @@ jobs:
           # ============================================================
           case "$QUALITY" in
             "audio")
-              FORMAT="bestaudio/bestaudio*"
+              FORMAT="bestaudio/bestaudio*/best"
               ;;
             "best")
               FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best"
               ;;
             "2160"|"4k")
-              FORMAT="bestvideo[height=2160]+bestaudio/bestvideo[height<=2160]+bestaudio/bestvideo[height=2160]*+bestaudio*/bestvideo[height<=2160]*+bestaudio*"
+              FORMAT="bestvideo[height<=2160]+bestaudio/bestvideo[height<=2160]*+bestaudio*/bestvideo+bestaudio/best"
               ;;
             "1440"|"2k")
-              FORMAT="bestvideo[height=1440]+bestaudio/bestvideo[height<=1440]+bestaudio/bestvideo[height=1440]*+bestaudio*/bestvideo[height<=1440]*+bestaudio*"
+              FORMAT="bestvideo[height<=1440]+bestaudio/bestvideo[height<=1440]*+bestaudio*/bestvideo+bestaudio/best"
               ;;
             "1080")
-              FORMAT="bestvideo[height=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/bestvideo[height=1080]*+bestaudio*/bestvideo[height<=1080]*+bestaudio*"
+              FORMAT="bestvideo[height<=1080]+bestaudio/bestvideo[height<=1080]*+bestaudio*/bestvideo+bestaudio/best"
               ;;
             "720")
-              FORMAT="bestvideo[height=720]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo[height=720]*+bestaudio*/bestvideo[height<=720]*+bestaudio*"
+              FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]*+bestaudio*/bestvideo+bestaudio/best"
               ;;
             "480")
-              FORMAT="bestvideo[height=480]+bestaudio/bestvideo[height<=480]+bestaudio/bestvideo[height=480]*+bestaudio*/bestvideo[height<=480]*+bestaudio*"
+              FORMAT="bestvideo[height<=480]+bestaudio/bestvideo[height<=480]*+bestaudio*/bestvideo+bestaudio/best"
+              ;;
+            "360")
+              FORMAT="bestvideo[height<=360]+bestaudio/bestvideo[height<=360]*+bestaudio*/bestvideo+bestaudio/best"
               ;;
             *)
               FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best"
@@ -1154,7 +1157,7 @@ jobs:
               SUB_ZIP_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('subtitle.zip', safe=''))" 2>/dev/null || echo "subtitle.zip")
               SUB_RAW_LINK="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/videos/${FOLDER_ENCODED}/${SUB_ZIP_ENCODED}"
 
-              # Patch the existing README.md — append subtitle section before the last footer
+              # Patch the existing README.md — insert subtitle section after Video Information, before Download Links
               # Wrapped in error handling - if this fails, we still want to push the video
               README_FILE="$BACKUP_DIR/${FOLDER_NAME}/README.md"
               if [ -f "$README_FILE" ]; then
@@ -1172,21 +1175,24 @@ jobs:
                     printf '%s\n' "| 1 | \`subtitle.zip\` | [Download](${SUB_RAW_LINK}) |"
                     printf '%s\n' ""
                     printf '%s\n' "> Contains all available subtitle languages. Extract to get \`.vtt\` files."
-                    printf '%s\n' ""
                   } > "$SUB_SECTION_FILE" 2>/dev/null || true
 
-                  # Find line number of last "---" in the README (the footer separator)
-                  LAST_SEP=$(grep -n "^---$" "$README_FILE" 2>/dev/null | tail -1 | cut -d: -f1)
-                  if [ -n "$LAST_SEP" ] && [ "$LAST_SEP" -gt 0 ] 2>/dev/null; then
-                    # Insert subtitle section before that last "---"
-                    INSERT_AT=$((LAST_SEP - 1))
+                  # Find line number of "## Download Link" section (works for both "## Download Links" and "## Download Link")
+                  DOWNLOAD_LINE=$(grep -n "^## Download Link" "$README_FILE" 2>/dev/null | head -1 | cut -d: -f1)
+                  if [ -n "$DOWNLOAD_LINE" ] && [ "$DOWNLOAD_LINE" -gt 0 ] 2>/dev/null; then
+                    # Find the "---" separator right before "## Download Link" (should be 2 lines before)
+                    INSERT_AT=$((DOWNLOAD_LINE - 2))
+                    if [ "$INSERT_AT" -lt 1 ]; then
+                      INSERT_AT=$((DOWNLOAD_LINE - 1))
+                    fi
                     if head -n "$INSERT_AT" "$README_FILE" > "${README_FILE}.tmp" 2>/dev/null; then
                       cat "$SUB_SECTION_FILE" >> "${README_FILE}.tmp" 2>/dev/null || true
+                      printf '\n' >> "${README_FILE}.tmp" 2>/dev/null || true
                       tail -n "+$((INSERT_AT + 1))" "$README_FILE" >> "${README_FILE}.tmp" 2>/dev/null || true
-                      mv "${README_FILE}.tmp" "$README_FILE" 2>/dev/null && echo "README patched with subtitle download link." || echo "⚠️  README patch failed, but continuing..."
+                      mv "${README_FILE}.tmp" "$README_FILE" 2>/dev/null && echo "README patched with subtitle section (after Video Information)." || echo "⚠️  README patch failed, but continuing..."
                     fi
                   else
-                    # No separator found — just append
+                    # Fallback: No "Download Link" section found — just append
                     cat "$SUB_SECTION_FILE" >> "$README_FILE" 2>/dev/null && echo "README appended with subtitle download link." || echo "⚠️  README append failed, but continuing..."
                   fi
                   rm -f "$SUB_SECTION_FILE" 2>/dev/null || true
