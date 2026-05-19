@@ -1,0 +1,49 @@
+# The-Andy-Webster-Rule：-How-Neymar-Could-Force-His-Way-Out-of-PSG
+
+<div align="center">
+  <picture>
+    <img src="https://github.com/alakiama/yt-dl-test/raw/main/videos/The-Andy-Webster-Rule%EF%BC%9A-How-Neymar-Could-Force-His-Way-Out-of-PSG/thumbnail.jpg" alt="Video Thumbnail" width="400" />
+  </picture>
+</div>
+
+<br>
+
+---
+
+## Video Information
+
+| Property | Value |
+|----------|-------|
+| **Video Name** | `The-Andy-Webster-Rule：-How-Neymar-Could-Force-His-Way-Out-of-PSG` |
+| **Original Link** | [YouTube Video](https://www.youtube.com/watch?v=W4Ha09nzE7c) |
+| **Total Size** | **1 file** (no split) - **12.84 MB** |
+| **Quality** | **480** |
+| **Status** | **Complete (100%)** |
+| **Password Protected** | **NO** |
+
+---
+
+---
+
+## 🔤 Subtitles
+
+| # | File | Link |
+|---|------|------|
+| 1 | `subtitle.zip` | [Download](https://github.com/alakiama/yt-dl-test/raw/main/videos/The-Andy-Webster-Rule%EF%BC%9A-How-Neymar-Could-Force-His-Way-Out-of-PSG/subtitle.zip) |
+
+> Contains all available subtitle languages. Extract to get `.vtt` files.
+
+
+## Download Link
+
+| # | File | Link |
+|---|------|------|
+| 1 | `The-Andy-Webster-Rule：-How-Neymar-Could-Force-His-Way-Out-of-PSG.mp4` | [Download](https://github.com/alakiama/yt-dl-test/raw/main/videos/The-Andy-Webster-Rule%EF%BC%9A-How-Neymar-Could-Force-His-Way-Out-of-PSG/The-Andy-Webster-Rule%EF%BC%9A-How-Neymar-Could-Force-His-Way-Out-of-PSG.mp4) |
+
+---
+
+Ready to use — no extraction needed!
+
+---
+
+*This tool created by [avasam.ir](https://avasam.ir)*
